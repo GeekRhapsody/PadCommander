@@ -1,6 +1,6 @@
 use eframe::egui;
 
-use crate::{action::Action, input, state::AppState};
+use crate::{action::CommanderAction, input, state::AppState};
 
 pub const APP_TITLE: &str = "Handheld Commander";
 
@@ -17,10 +17,11 @@ impl HandheldCommanderApp {
         Self { state }
     }
 
-    fn handle_action(&mut self, ctx: &egui::Context, action: Action) {
-        match action {
-            Action::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
-            action => self.state.apply_action(action),
+    fn handle_action(&mut self, ctx: &egui::Context, action: CommanderAction) {
+        let result = self.state.dispatch_action(action);
+
+        if result.quit_requested {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
 }

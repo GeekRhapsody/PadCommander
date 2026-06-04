@@ -1,11 +1,11 @@
 use eframe::egui;
 
 use crate::{
-    action::Action,
-    state::{AppState, PaneSide, PaneState},
+    action::CommanderAction,
+    state::{AppState, FileEntry, PaneLoadState, PaneSide, PaneState},
 };
 
-pub fn show(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
+pub fn show(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<CommanderAction>) {
     ui.columns(2, |columns| {
         pane(
             &mut columns[0],
@@ -29,7 +29,7 @@ fn pane(
     side: PaneSide,
     pane: &PaneState,
     is_active: bool,
-    actions: &mut Vec<Action>,
+    actions: &mut Vec<CommanderAction>,
 ) {
     let accent = if is_active {
         egui::Color32::from_rgb(132, 184, 153)
@@ -47,13 +47,18 @@ fn pane(
             ui.horizontal(|ui| {
                 ui.strong(&pane.title);
                 ui.separator();
-                ui.label(&pane.location);
+                ui.label(&pane.current_location);
+                ui.separator();
+                ui.label(format!("Marked: {}", pane.marked_items.len()));
+                ui.separator();
+                ui.label(format!("Scroll: {:.0}", pane.scroll_offset));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let indicator = if is_active { "ACTIVE" } else { "STANDBY" };
                     ui.label(egui::RichText::new(indicator).color(accent).strong());
                 });
             });
 
+            pane_load_state(ui, &pane.load_state);
             ui.add_space(6.0);
             header_row(ui);
             ui.separator();
@@ -61,8 +66,8 @@ fn pane(
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    for (index, row) in pane.rows.iter().enumerate() {
-                        let selected = is_active && index == pane.selected_row;
+                    for (index, entry) in pane.entries.iter().enumerate() {
+                        let selected = is_active && index == pane.selected_index;
                         let fill = if selected {
                             egui::Color32::from_rgb(59, 78, 73)
                         } else if index % 2 == 0 {
@@ -74,16 +79,29 @@ fn pane(
                         let response = egui::Frame::new()
                             .fill(fill)
                             .inner_margin(egui::Margin::symmetric(8, 5))
-                            .show(ui, |ui| row_contents(ui, row))
+                            .show(ui, |ui| row_contents(ui, entry))
                             .response
-                            .interact(egui::Sense::click());
+                            .interact(egui::Sense::click())
+                            .on_hover_text(&entry.virtual_path);
 
                         if response.clicked() {
-                            actions.push(Action::ActivatePane(side));
+                            actions.push(CommanderAction::SelectEntry { pane: side, index });
                         }
                     }
                 });
         });
+}
+
+fn pane_load_state(ui: &mut egui::Ui, load_state: &PaneLoadState) {
+    match load_state {
+        PaneLoadState::Ready => {}
+        PaneLoadState::Loading => {
+            ui.label(egui::RichText::new("Loading...").italics());
+        }
+        PaneLoadState::Error(error) => {
+            ui.label(egui::RichText::new(error).color(egui::Color32::LIGHT_RED));
+        }
+    }
 }
 
 fn header_row(ui: &mut egui::Ui) {
@@ -96,15 +114,33 @@ fn header_row(ui: &mut egui::Ui) {
         ui.strong("Size");
         ui.add_space(64.0);
         ui.strong("Modified");
+        ui.add_space(64.0);
+        ui.strong("Flags");
     });
 }
 
-fn row_contents(ui: &mut egui::Ui, row: &crate::state::FileRow) {
+fn row_contents(ui: &mut egui::Ui, entry: &FileEntry) {
     ui.horizontal(|ui| {
         ui.set_height(28.0);
-        ui.add_sized([240.0, 24.0], egui::Label::new(&row.name).truncate());
-        ui.add_sized([82.0, 24.0], egui::Label::new(&row.kind).truncate());
-        ui.add_sized([74.0, 24.0], egui::Label::new(&row.size).truncate());
-        ui.add_sized([90.0, 24.0], egui::Label::new(&row.modified).truncate());
+        ui.add_sized(
+            [240.0, 24.0],
+            egui::Label::new(&entry.display_name).truncate(),
+        );
+        ui.add_sized(
+            [82.0, 24.0],
+            egui::Label::new(entry.kind_label()).truncate(),
+        );
+        ui.add_sized(
+            [74.0, 24.0],
+            egui::Label::new(entry.size_label()).truncate(),
+        );
+        ui.add_sized(
+            [90.0, 24.0],
+            egui::Label::new(entry.modified_label()).truncate(),
+        );
+        ui.add_sized(
+            [48.0, 24.0],
+            egui::Label::new(entry.flags_label()).truncate(),
+        );
     });
 }

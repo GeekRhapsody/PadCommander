@@ -3,9 +3,13 @@ pub mod panes;
 
 use eframe::egui;
 
-use crate::{action::Action, app::APP_TITLE, state::AppState};
+use crate::{
+    action::CommanderAction,
+    app::APP_TITLE,
+    state::{AppState, DialogState},
+};
 
-pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<Action> {
+pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<CommanderAction> {
     let mut actions = Vec::new();
 
     egui::Panel::top("top_status")
@@ -34,6 +38,15 @@ fn header(ui: &mut egui::Ui, state: &AppState) {
         ui.horizontal(|ui| {
             ui.label(format!("Active pane: {}", state.active_pane_label()));
             ui.separator();
+            ui.label(format!(
+                "Selected: {}",
+                state
+                    .active_pane()
+                    .selected_entry()
+                    .map(|entry| entry.display_name.as_str())
+                    .unwrap_or("none")
+            ));
+            ui.separator();
             ui.label(format!("UI scale: {:.1}", state.settings.ui_scale));
             ui.separator();
             ui.label(format!("VFS: {}", state.vfs_label()));
@@ -46,8 +59,10 @@ fn header(ui: &mut egui::Ui, state: &AppState) {
 }
 
 fn modal_overlay(ctx: &egui::Context, state: &AppState) {
-    let Some(modal) = &state.modal else {
-        return;
+    let (title, message) = match &state.dialog {
+        DialogState::Message { title, message } => (title.as_str(), message.as_str()),
+        DialogState::TextInput { title, value } => (title.as_str(), value.as_str()),
+        DialogState::None => return,
     };
 
     let screen_rect = ctx.content_rect();
@@ -74,8 +89,8 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState) {
                 .inner_margin(egui::Margin::same(16))
                 .show(ui, |ui| {
                     ui.set_min_width(360.0);
-                    ui.heading(&modal.title);
-                    ui.label(&modal.message);
+                    ui.heading(title);
+                    ui.label(message);
                 });
         });
 }
