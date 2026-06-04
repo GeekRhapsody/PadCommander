@@ -21,6 +21,7 @@ pub struct AppState {
     pub active_pane: PaneSide,
     pub status: String,
     pub dialog: DialogState,
+    pub show_input_help: bool,
     pub local_file_system: LocalFileSystem,
     pub task_manager: TaskManager,
 }
@@ -60,8 +61,10 @@ impl AppState {
                 ],
             ),
             active_pane: PaneSide::Left,
-            status: "Ready. Tab switches panes. Esc or Ctrl+Q quits during development.".to_owned(),
+            status: "Ready. F1 or View opens input help. Ctrl+Q quits during development."
+                .to_owned(),
             dialog: DialogState::None,
+            show_input_help: false,
             local_file_system: LocalFileSystem,
             task_manager: TaskManager,
         }
@@ -103,12 +106,32 @@ impl AppState {
                 self.move_active_selection(SelectionMovement::Home)
             }
             CommanderAction::MoveSelectionEnd => self.move_active_selection(SelectionMovement::End),
+            CommanderAction::OpenSelected => self.open_or_confirm_selected(),
+            CommanderAction::GoParent => {
+                self.status = "GoParent is reserved for filesystem navigation.".to_owned();
+            }
+            CommanderAction::Refresh => {
+                self.status = "Refresh is reserved for filesystem loading.".to_owned();
+            }
+            CommanderAction::ToggleMarkSelected => self.toggle_mark_selected(),
             CommanderAction::Cancel => {
-                self.dialog = DialogState::None;
-                self.status = "Cancelled.".to_owned();
+                if self.show_input_help {
+                    self.show_input_help = false;
+                    self.status = "Input help closed.".to_owned();
+                } else if self.dialog != DialogState::None {
+                    self.dialog = DialogState::None;
+                    self.status = "Cancelled.".to_owned();
+                } else {
+                    self.status = "Cancel/back is reserved for navigation history.".to_owned();
+                }
             }
             CommanderAction::Confirm => {
-                self.status = "Confirm is reserved for the next dialog milestone.".to_owned();
+                if self.dialog != DialogState::None {
+                    self.dialog = DialogState::None;
+                    self.status = "Confirmed placeholder dialog.".to_owned();
+                } else {
+                    self.open_or_confirm_selected();
+                }
             }
             CommanderAction::OpenSettings => {
                 self.dialog = DialogState::Message {
@@ -122,6 +145,20 @@ impl AppState {
             CommanderAction::CreateTextFile => self.begin_text_input("Create Text File"),
             CommanderAction::Rename => self.begin_text_input("Rename"),
             CommanderAction::ConnectFtp => self.begin_text_input("Connect FTP"),
+            CommanderAction::OpenFavourites => {
+                self.status = "Favourites are reserved for a future milestone.".to_owned();
+            }
+            CommanderAction::OpenCommandPalette => {
+                self.status = "Command palette is reserved for a future milestone.".to_owned();
+            }
+            CommanderAction::ToggleInputHelp => {
+                self.show_input_help = !self.show_input_help;
+                self.status = if self.show_input_help {
+                    "Input help opened.".to_owned()
+                } else {
+                    "Input help closed.".to_owned()
+                };
+            }
             CommanderAction::TextInput(text_action) => self.handle_text_input(text_action),
             CommanderAction::QuitDevelopment => {
                 self.status = "Quit requested.".to_owned();
@@ -183,6 +220,47 @@ impl AppState {
                 PaneSide::Right => "Right",
             }
         );
+    }
+
+    fn open_or_confirm_selected(&mut self) {
+        if self.dialog != DialogState::None {
+            self.dialog = DialogState::None;
+            self.status = "Confirmed placeholder dialog.".to_owned();
+            return;
+        }
+
+        let selected_name = self
+            .active_pane()
+            .selected_entry()
+            .map(|entry| entry.display_name.clone())
+            .unwrap_or_else(|| "nothing".to_owned());
+        self.status = format!("OpenSelected for {selected_name} is reserved for VFS navigation.");
+    }
+
+    fn toggle_mark_selected(&mut self) {
+        let Some(path) = self
+            .active_pane()
+            .selected_entry()
+            .map(|entry| entry.virtual_path.clone())
+        else {
+            self.status = "No entry available to mark.".to_owned();
+            return;
+        };
+
+        let pane = self.pane_mut(self.active_pane);
+        let marked = if pane.marked_items.contains(&path) {
+            pane.marked_items.remove(&path);
+            false
+        } else {
+            pane.marked_items.insert(path.clone());
+            true
+        };
+
+        self.status = if marked {
+            format!("Marked {path}.")
+        } else {
+            format!("Unmarked {path}.")
+        };
     }
 
     fn handle_text_input(&mut self, text_action: TextInputAction) {

@@ -6,6 +6,7 @@ pub const APP_TITLE: &str = "Handheld Commander";
 
 pub struct HandheldCommanderApp {
     state: AppState,
+    input_manager: input::InputManager,
 }
 
 impl HandheldCommanderApp {
@@ -14,7 +15,10 @@ impl HandheldCommanderApp {
         apply_ui_scale(&cc.egui_ctx, state.settings.ui_scale);
         configure_visuals(&cc.egui_ctx);
 
-        Self { state }
+        Self {
+            state,
+            input_manager: input::InputManager::new(),
+        }
     }
 
     fn handle_action(&mut self, ctx: &egui::Context, action: CommanderAction) {
@@ -31,12 +35,14 @@ impl eframe::App for HandheldCommanderApp {
         let ctx = ui.ctx().clone();
         apply_ui_scale(&ctx, self.state.settings.ui_scale);
 
-        let mut actions = input::collect_actions(&ctx);
+        let mut actions = self.input_manager.collect_actions(&ctx);
         actions.extend(crate::ui::show(ui, &self.state));
 
         for action in actions {
             self.handle_action(&ctx, action);
         }
+
+        ctx.request_repaint_after(input::GAMEPAD_POLL_INTERVAL);
     }
 }
 
