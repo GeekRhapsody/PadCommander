@@ -49,7 +49,7 @@ fn pane(
                 ui.separator();
                 ui.label(crate::fs::location_label(&pane.current_location));
                 ui.separator();
-                ui.label(format!("Marked: {}", pane.marked_items.len()));
+                ui.label(format!("Marked: {}", pane.marked_summary().size_label()));
                 ui.separator();
                 ui.label(format!("Scroll: {:.0}", pane.scroll_offset));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -68,8 +68,14 @@ fn pane(
                 .show(ui, |ui| {
                     for (index, entry) in pane.entries.iter().enumerate() {
                         let selected = is_active && index == pane.selected_index;
+                        let marked = pane.marked_items.contains(&entry.virtual_path);
+                        let disabled = !entry.is_available_source();
                         let fill = if selected {
                             egui::Color32::from_rgb(59, 78, 73)
+                        } else if marked {
+                            egui::Color32::from_rgb(58, 52, 35)
+                        } else if disabled {
+                            egui::Color32::from_rgb(28, 30, 31)
                         } else if index % 2 == 0 {
                             egui::Color32::from_rgb(38, 42, 43)
                         } else {
@@ -79,10 +85,14 @@ fn pane(
                         let response = egui::Frame::new()
                             .fill(fill)
                             .inner_margin(egui::Margin::symmetric(8, 5))
-                            .show(ui, |ui| row_contents(ui, entry))
+                            .show(ui, |ui| row_contents(ui, entry, selected, marked, disabled))
                             .response
                             .interact(egui::Sense::click())
                             .on_hover_text(&entry.virtual_path);
+
+                        if selected {
+                            response.scroll_to_me(Some(egui::Align::Center));
+                        }
 
                         if response.clicked() {
                             actions.push(CommanderAction::SelectEntry { pane: side, index });
@@ -119,28 +129,48 @@ fn header_row(ui: &mut egui::Ui) {
     });
 }
 
-fn row_contents(ui: &mut egui::Ui, entry: &FileEntry) {
+fn row_contents(
+    ui: &mut egui::Ui,
+    entry: &FileEntry,
+    selected: bool,
+    marked: bool,
+    disabled: bool,
+) {
+    let name = if marked {
+        format!("* {}", entry.display_name)
+    } else {
+        format!("  {}", entry.display_name)
+    };
+    let text_color = if disabled {
+        egui::Color32::from_rgb(130, 136, 137)
+    } else if selected {
+        egui::Color32::WHITE
+    } else {
+        ui.visuals().text_color()
+    };
+
     ui.horizontal(|ui| {
         ui.set_height(28.0);
         ui.add_sized(
             [240.0, 24.0],
-            egui::Label::new(&entry.display_name).truncate(),
+            egui::Label::new(egui::RichText::new(name).color(text_color)).truncate(),
         );
         ui.add_sized(
             [82.0, 24.0],
-            egui::Label::new(entry.kind_label()).truncate(),
+            egui::Label::new(egui::RichText::new(entry.kind_label()).color(text_color)).truncate(),
         );
         ui.add_sized(
             [74.0, 24.0],
-            egui::Label::new(entry.size_label()).truncate(),
+            egui::Label::new(egui::RichText::new(entry.size_label()).color(text_color)).truncate(),
         );
         ui.add_sized(
             [90.0, 24.0],
-            egui::Label::new(entry.modified_label()).truncate(),
+            egui::Label::new(egui::RichText::new(entry.modified_label()).color(text_color))
+                .truncate(),
         );
         ui.add_sized(
             [48.0, 24.0],
-            egui::Label::new(entry.flags_label()).truncate(),
+            egui::Label::new(egui::RichText::new(entry.flags_label()).color(text_color)).truncate(),
         );
     });
 }

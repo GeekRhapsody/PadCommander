@@ -7,6 +7,8 @@ use crate::{
 
 use std::{collections::BTreeSet, time::SystemTime};
 
+const SCROLL_ROW_HEIGHT: f32 = 29.0;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PaneSide {
     Left,
@@ -146,6 +148,14 @@ impl AppState {
                     quit_requested: true,
                 };
             }
+            CommanderAction::CopyToOtherPane
+            | CommanderAction::MoveToOtherPane
+            | CommanderAction::Delete
+            | CommanderAction::CompressToOtherPane
+            | CommanderAction::DecompressToOtherPane
+            | CommanderAction::UploadToOtherPane
+            | CommanderAction::DownloadToOtherPane
+            | CommanderAction::CreateShortcutInOtherPane => self.set_operation_todo_status(action),
             action => self.set_todo_status(action),
         }
 
@@ -234,16 +244,17 @@ impl AppState {
     }
 
     fn toggle_mark_selected(&mut self) {
-        let Some(path) = self
-            .active_pane()
-            .selected_entry()
-            .map(|entry| entry.virtual_path.clone())
+        let active_pane = self.active_pane;
+        let Some((path, display_name)) = self
+            .pane(active_pane)
+            .selected_markable_entry()
+            .map(|entry| (entry.virtual_path.clone(), entry.display_name.clone()))
         else {
-            self.status = "No entry available to mark.".to_owned();
+            self.status = "The focused row cannot be marked.".to_owned();
             return;
         };
 
-        let pane = self.pane_mut(self.active_pane);
+        let pane = self.pane_mut(active_pane);
         let marked = if pane.marked_items.contains(&path) {
             pane.marked_items.remove(&path);
             false
@@ -253,9 +264,9 @@ impl AppState {
         };
 
         self.status = if marked {
-            format!("Marked {path}.")
+            format!("Marked {display_name}.")
         } else {
-            format!("Unmarked {path}.")
+            format!("Unmarked {display_name}.")
         };
     }
 
@@ -284,6 +295,23 @@ impl AppState {
         self.status = format!("{action:?} is reserved for a future milestone.");
     }
 
+    fn set_operation_todo_status(&mut self, action: CommanderAction) {
+        let sources = self.active_operation_sources();
+        self.status = if sources.is_empty() {
+            format!("{action:?}: no available source items.")
+        } else {
+            format!(
+                "{action:?} would use {} item(s): {}",
+                sources.len(),
+                sources
+                    .iter()
+                    .map(|entry| entry.display_name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+    }
+
     fn navigate_active_pane(&mut self, location: String) {
         let active_pane = self.active_pane;
         self.pane_mut(active_pane).current_location = location;
@@ -298,16 +326,19 @@ impl AppState {
 
     fn refresh_pane(&mut self, side: PaneSide) {
         let location = self.pane(side).current_location.clone();
+        let previous_selection_path = self
+            .pane(side)
+            .selected_entry()
+            .map(|entry| entry.virtual_path.clone());
         let result = self.local_file_system.list_location(&location);
         let pane = self.pane_mut(side);
 
         match result {
             Ok(entries) => {
                 pane.entries = entries;
-                pane.selected_index = if pane.entries.len() > 1 { 1 } else { 0 };
+                pane.retain_valid_marks();
+                pane.restore_selection(previous_selection_path.as_deref());
                 pane.load_state = PaneLoadState::Ready;
-                pane.marked_items.clear();
-                pane.scroll_offset = 0.0;
                 self.status = format!("Loaded {}.", fs::location_label(&location));
             }
             Err(error) => {
@@ -330,6 +361,10 @@ impl AppState {
         } else {
             false
         }
+    }
+
+    pub fn active_operation_sources(&self) -> Vec<FileEntry> {
+        self.active_pane().operation_sources()
     }
 }
 
@@ -361,12 +396,18 @@ impl PaneState {
         self.entries.get(self.selected_index)
     }
 
+    pub fn selected_markable_entry(&self) -> Option<&FileEntry> {
+        self.selected_entry()
+            .filter(|entry| entry.is_available_source())
+    }
+
     pub fn select_index(&mut self, index: usize) {
         if self.entries.is_empty() {
             self.selected_index = 0;
         } else {
             self.selected_index = index.min(self.entries.len() - 1);
         }
+        self.follow_selection();
     }
 
     pub fn move_selection(&mut self, movement: SelectionMovement) {
@@ -384,6 +425,73 @@ impl PaneState {
             SelectionMovement::Home => 0,
             SelectionMovement::End => last_index,
         };
+        self.follow_selection();
+    }
+
+    pub fn marked_summary(&self) -> MarkedSummary {
+        let mut summary = MarkedSummary::default();
+
+        for entry in self.marked_entries() {
+            summary.count += 1;
+            if let Some(size) = entry.size {
+                summary.total_size = summary.total_size.saturating_add(size);
+            } else {
+                summary.has_unknown_size = true;
+            }
+        }
+
+        summary
+    }
+
+    pub fn operation_sources(&self) -> Vec<FileEntry> {
+        let marked = self.marked_entries();
+        if !marked.is_empty() {
+            return marked.into_iter().cloned().collect();
+        }
+
+        self.selected_markable_entry()
+            .cloned()
+            .into_iter()
+            .collect()
+    }
+
+    fn marked_entries(&self) -> Vec<&FileEntry> {
+        self.entries
+            .iter()
+            .filter(|entry| self.marked_items.contains(&entry.virtual_path))
+            .filter(|entry| entry.is_available_source())
+            .collect()
+    }
+
+    fn retain_valid_marks(&mut self) {
+        let valid_paths: BTreeSet<_> = self
+            .entries
+            .iter()
+            .filter(|entry| entry.is_available_source())
+            .map(|entry| entry.virtual_path.clone())
+            .collect();
+        self.marked_items.retain(|path| valid_paths.contains(path));
+    }
+
+    fn restore_selection(&mut self, previous_selection_path: Option<&str>) {
+        if self.entries.is_empty() {
+            self.selected_index = 0;
+            self.scroll_offset = 0.0;
+            return;
+        }
+
+        self.selected_index = previous_selection_path
+            .and_then(|path| {
+                self.entries
+                    .iter()
+                    .position(|entry| entry.virtual_path == path)
+            })
+            .unwrap_or(if self.entries.len() > 1 { 1 } else { 0 });
+        self.follow_selection();
+    }
+
+    fn follow_selection(&mut self) {
+        self.scroll_offset = self.selected_index as f32 * SCROLL_ROW_HEIGHT;
     }
 }
 
@@ -424,10 +532,18 @@ impl FileEntry {
 
     pub fn size_label(&self) -> String {
         match self.size {
-            Some(size) if size >= 1024 * 1024 => format!("{} MB", size / (1024 * 1024)),
-            Some(size) if size >= 1024 => format!("{} KB", size / 1024),
-            Some(size) => format!("{size} B"),
+            Some(size) => Self::size_value_label(size),
             None => String::new(),
+        }
+    }
+
+    pub fn size_value_label(size: u64) -> String {
+        if size >= 1024 * 1024 {
+            format!("{} MB", size / (1024 * 1024))
+        } else if size >= 1024 {
+            format!("{} KB", size / 1024)
+        } else {
+            format!("{size} B")
         }
     }
 
@@ -444,6 +560,32 @@ impl FileEntry {
             flags.push("R");
         }
         flags.join(" ")
+    }
+
+    pub fn is_available_source(&self) -> bool {
+        !matches!(self.kind, FileEntryKind::Parent | FileEntryKind::Drive)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct MarkedSummary {
+    pub count: usize,
+    pub total_size: u64,
+    pub has_unknown_size: bool,
+}
+
+impl MarkedSummary {
+    pub fn size_label(self) -> String {
+        if self.count == 0 {
+            return "0 items".to_owned();
+        }
+
+        let size_label = FileEntry::size_value_label(self.total_size);
+        if self.has_unknown_size {
+            format!("{} item(s), {size_label} + unknown", self.count)
+        } else {
+            format!("{} item(s), {size_label}", self.count)
+        }
     }
 }
 
@@ -496,7 +638,7 @@ mod tests {
             display_name: name.to_owned(),
             virtual_path: name.to_owned(),
             kind: FileEntryKind::File,
-            size: None,
+            size: Some(1024),
             modified: None,
             flags: FileEntryFlags::default(),
         }
@@ -582,5 +724,65 @@ mod tests {
 
         assert_eq!(state.left_pane.selected_index, 2);
         assert_eq!(state.right_pane.selected_index, right_initial_selection);
+    }
+
+    #[test]
+    fn toggle_mark_selected_marks_and_unmarks_focused_item() {
+        let mut state = test_state();
+
+        state.dispatch_action(CommanderAction::ToggleMarkSelected);
+        assert!(state.left_pane.marked_items.contains("b"));
+
+        state.dispatch_action(CommanderAction::ToggleMarkSelected);
+        assert!(state.left_pane.marked_items.is_empty());
+    }
+
+    #[test]
+    fn operation_sources_use_focused_item_when_nothing_marked() {
+        let state = test_state();
+
+        let sources = state.active_operation_sources();
+
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].display_name, "b");
+    }
+
+    #[test]
+    fn operation_sources_use_all_marked_items() {
+        let mut state = test_state();
+        state.dispatch_action(CommanderAction::ToggleMarkSelected);
+        state.dispatch_action(CommanderAction::MoveSelectionDown);
+        state.dispatch_action(CommanderAction::ToggleMarkSelected);
+
+        let names: Vec<_> = state
+            .active_operation_sources()
+            .into_iter()
+            .map(|entry| entry.display_name)
+            .collect();
+
+        assert_eq!(names, ["b", "c"]);
+        assert_eq!(state.left_pane.marked_summary().count, 2);
+        assert_eq!(state.left_pane.marked_summary().total_size, 2048);
+    }
+
+    #[test]
+    fn restore_selection_keeps_matching_path_when_refreshing_entries() {
+        let mut pane = PaneState {
+            title: "Test".to_owned(),
+            current_location: fs::ROOTS_LOCATION.to_owned(),
+            entries: vec![test_entry("a"), test_entry("b"), test_entry("c")],
+            selected_index: 1,
+            marked_items: BTreeSet::from(["missing".to_owned(), "c".to_owned()]),
+            load_state: PaneLoadState::Ready,
+            scroll_offset: 0.0,
+        };
+
+        pane.entries = vec![test_entry("c"), test_entry("b")];
+        pane.retain_valid_marks();
+        pane.restore_selection(Some("b"));
+
+        assert_eq!(pane.selected_index, 1);
+        assert!(pane.marked_items.contains("c"));
+        assert!(!pane.marked_items.contains("missing"));
     }
 }

@@ -84,6 +84,10 @@ impl KeyboardInputManager {
                 actions.push(CommanderAction::GoParent);
             }
 
+            if input.key_pressed(egui::Key::Space) {
+                actions.push(CommanderAction::ToggleMarkSelected);
+            }
+
             if input.key_pressed(egui::Key::F1) {
                 actions.push(CommanderAction::ToggleInputHelp);
             }
