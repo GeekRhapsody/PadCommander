@@ -47,7 +47,7 @@ fn pane(
             ui.horizontal(|ui| {
                 ui.strong(&pane.title);
                 ui.separator();
-                ui.label(&pane.current_location);
+                ui.label(crate::fs::location_label(&pane.current_location));
                 ui.separator();
                 ui.label(format!("Marked: {}", pane.marked_items.len()));
                 ui.separator();

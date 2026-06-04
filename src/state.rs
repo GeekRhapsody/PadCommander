@@ -1,6 +1,6 @@
 use crate::{
     action::{CommanderAction, TextInputAction},
-    fs::{self, LocalFileSystem},
+    fs::{self, LocalFileSystem, VirtualFileSystem},
     settings::Settings,
     tasks::TaskManager,
 };
@@ -28,46 +28,24 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
-        Self {
+        let local_file_system = LocalFileSystem;
+        let initial_location = local_file_system.initial_location();
+        let mut state = Self {
             settings: Settings::default(),
-            left_pane: PaneState::placeholder(
-                "Left Pane",
-                "C:\\Users\\Player\\Documents",
-                &[
-                    ("..", FileEntryKind::Parent, None),
-                    ("Archives", FileEntryKind::Directory, None),
-                    ("Games", FileEntryKind::Directory, None),
-                    ("Screenshots", FileEntryKind::Directory, None),
-                    ("readme.txt", FileEntryKind::File, Some(4 * 1024)),
-                    ("save-slot-01.dat", FileEntryKind::File, Some(128 * 1024)),
-                    ("playlist.m3u", FileEntryKind::File, Some(2 * 1024)),
-                ],
-            ),
-            right_pane: PaneState::placeholder(
-                "Right Pane",
-                "D:\\Backups\\Handheld",
-                &[
-                    ("..", FileEntryKind::Parent, None),
-                    ("Incoming", FileEntryKind::Directory, None),
-                    ("Music", FileEntryKind::Directory, None),
-                    ("Profiles", FileEntryKind::Directory, None),
-                    (
-                        "commander.zip",
-                        FileEntryKind::Archive,
-                        Some(42 * 1024 * 1024),
-                    ),
-                    ("notes.md", FileEntryKind::File, Some(12 * 1024)),
-                    ("theme-preview.png", FileEntryKind::File, Some(840 * 1024)),
-                ],
-            ),
+            left_pane: PaneState::new("Left Pane", initial_location.clone()),
+            right_pane: PaneState::new("Right Pane", initial_location),
             active_pane: PaneSide::Left,
             status: "Ready. F1 or View opens input help. Ctrl+Q quits during development."
                 .to_owned(),
             dialog: DialogState::None,
             show_input_help: false,
-            local_file_system: LocalFileSystem,
+            local_file_system,
             task_manager: TaskManager,
-        }
+        };
+
+        state.refresh_pane(PaneSide::Left);
+        state.refresh_pane(PaneSide::Right);
+        state
     }
 
     pub fn active_pane_label(&self) -> &'static str {
@@ -108,10 +86,10 @@ impl AppState {
             CommanderAction::MoveSelectionEnd => self.move_active_selection(SelectionMovement::End),
             CommanderAction::OpenSelected => self.open_or_confirm_selected(),
             CommanderAction::GoParent => {
-                self.status = "GoParent is reserved for filesystem navigation.".to_owned();
+                self.go_parent(self.active_pane);
             }
             CommanderAction::Refresh => {
-                self.status = "Refresh is reserved for filesystem loading.".to_owned();
+                self.refresh_pane(self.active_pane);
             }
             CommanderAction::ToggleMarkSelected => self.toggle_mark_selected(),
             CommanderAction::Cancel => {
@@ -121,6 +99,8 @@ impl AppState {
                 } else if self.dialog != DialogState::None {
                     self.dialog = DialogState::None;
                     self.status = "Cancelled.".to_owned();
+                } else if self.clear_active_error() {
+                    self.status = "Error dismissed.".to_owned();
                 } else {
                     self.status = "Cancel/back is reserved for navigation history.".to_owned();
                 }
@@ -229,12 +209,28 @@ impl AppState {
             return;
         }
 
-        let selected_name = self
-            .active_pane()
-            .selected_entry()
-            .map(|entry| entry.display_name.clone())
-            .unwrap_or_else(|| "nothing".to_owned());
-        self.status = format!("OpenSelected for {selected_name} is reserved for VFS navigation.");
+        let Some(selected_entry) = self.active_pane().selected_entry().cloned() else {
+            self.status = "No entry selected.".to_owned();
+            return;
+        };
+
+        match selected_entry.kind {
+            FileEntryKind::Drive | FileEntryKind::Directory | FileEntryKind::Parent => {
+                self.navigate_active_pane(selected_entry.virtual_path);
+            }
+            FileEntryKind::File | FileEntryKind::Archive => {
+                self.status = format!(
+                    "{} is a file. Opening files is reserved for a future milestone.",
+                    selected_entry.display_name
+                );
+            }
+            FileEntryKind::FtpItem | FileEntryKind::Unknown => {
+                self.status = format!(
+                    "{} cannot be opened by local navigation.",
+                    selected_entry.display_name
+                );
+            }
+        }
     }
 
     fn toggle_mark_selected(&mut self) {
@@ -287,6 +283,54 @@ impl AppState {
     fn set_todo_status(&mut self, action: CommanderAction) {
         self.status = format!("{action:?} is reserved for a future milestone.");
     }
+
+    fn navigate_active_pane(&mut self, location: String) {
+        let active_pane = self.active_pane;
+        self.pane_mut(active_pane).current_location = location;
+        self.refresh_pane(active_pane);
+    }
+
+    fn go_parent(&mut self, side: PaneSide) {
+        let parent = fs::parent_location(&self.pane(side).current_location);
+        self.pane_mut(side).current_location = parent;
+        self.refresh_pane(side);
+    }
+
+    fn refresh_pane(&mut self, side: PaneSide) {
+        let location = self.pane(side).current_location.clone();
+        let result = self.local_file_system.list_location(&location);
+        let pane = self.pane_mut(side);
+
+        match result {
+            Ok(entries) => {
+                pane.entries = entries;
+                pane.selected_index = if pane.entries.len() > 1 { 1 } else { 0 };
+                pane.load_state = PaneLoadState::Ready;
+                pane.marked_items.clear();
+                pane.scroll_offset = 0.0;
+                self.status = format!("Loaded {}.", fs::location_label(&location));
+            }
+            Err(error) => {
+                let message = error.user_message();
+                pane.entries.clear();
+                pane.selected_index = 0;
+                pane.marked_items.clear();
+                pane.scroll_offset = 0.0;
+                pane.load_state = PaneLoadState::Error(message.clone());
+                self.status = message;
+            }
+        }
+    }
+
+    fn clear_active_error(&mut self) -> bool {
+        let pane = self.pane_mut(self.active_pane);
+        if matches!(pane.load_state, PaneLoadState::Error(_)) {
+            pane.load_state = PaneLoadState::Ready;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -301,28 +345,14 @@ pub struct PaneState {
 }
 
 impl PaneState {
-    fn placeholder(
-        title: &str,
-        location: &str,
-        rows: &[(&str, FileEntryKind, Option<u64>)],
-    ) -> Self {
+    fn new(title: &str, location: String) -> Self {
         Self {
             title: title.to_owned(),
-            current_location: location.to_owned(),
-            entries: rows
-                .iter()
-                .map(|(name, kind, size)| FileEntry {
-                    display_name: (*name).to_owned(),
-                    virtual_path: format!("{location}\\{name}"),
-                    kind: *kind,
-                    size: *size,
-                    modified: None,
-                    flags: FileEntryFlags::default(),
-                })
-                .collect(),
-            selected_index: 1,
+            current_location: location,
+            entries: Vec::new(),
+            selected_index: 0,
             marked_items: BTreeSet::new(),
-            load_state: PaneLoadState::Ready,
+            load_state: PaneLoadState::Loading,
             scroll_offset: 0.0,
         }
     }
@@ -401,12 +431,8 @@ impl FileEntry {
         }
     }
 
-    pub fn modified_label(&self) -> &'static str {
-        if self.modified.is_some() {
-            "Known"
-        } else {
-            "-"
-        }
+    pub fn modified_label(&self) -> String {
+        fs::modified_label(self.modified)
     }
 
     pub fn flags_label(&self) -> String {
@@ -465,9 +491,50 @@ mod tests {
     use super::*;
     use crate::action::CommanderAction;
 
+    fn test_entry(name: &str) -> FileEntry {
+        FileEntry {
+            display_name: name.to_owned(),
+            virtual_path: name.to_owned(),
+            kind: FileEntryKind::File,
+            size: None,
+            modified: None,
+            flags: FileEntryFlags::default(),
+        }
+    }
+
+    fn test_state() -> AppState {
+        AppState {
+            settings: Settings::default(),
+            left_pane: PaneState {
+                title: "Left".to_owned(),
+                current_location: fs::ROOTS_LOCATION.to_owned(),
+                entries: vec![test_entry("a"), test_entry("b"), test_entry("c")],
+                selected_index: 1,
+                marked_items: BTreeSet::new(),
+                load_state: PaneLoadState::Ready,
+                scroll_offset: 0.0,
+            },
+            right_pane: PaneState {
+                title: "Right".to_owned(),
+                current_location: fs::ROOTS_LOCATION.to_owned(),
+                entries: vec![test_entry("x"), test_entry("y"), test_entry("z")],
+                selected_index: 1,
+                marked_items: BTreeSet::new(),
+                load_state: PaneLoadState::Ready,
+                scroll_offset: 0.0,
+            },
+            active_pane: PaneSide::Left,
+            status: String::new(),
+            dialog: DialogState::None,
+            show_input_help: false,
+            local_file_system: LocalFileSystem,
+            task_manager: TaskManager,
+        }
+    }
+
     #[test]
     fn switching_panes_toggles_active_side() {
-        let mut state = AppState::new();
+        let mut state = test_state();
 
         assert_eq!(state.active_pane, PaneSide::Left);
 
@@ -480,7 +547,7 @@ mod tests {
 
     #[test]
     fn selection_movement_is_clamped_to_entries() {
-        let mut state = AppState::new();
+        let mut state = test_state();
 
         assert_eq!(state.active_pane().selected_index, 1);
 
@@ -508,7 +575,7 @@ mod tests {
 
     #[test]
     fn movement_applies_only_to_active_pane() {
-        let mut state = AppState::new();
+        let mut state = test_state();
         let right_initial_selection = state.right_pane.selected_index;
 
         state.dispatch_action(CommanderAction::MoveSelectionDown);
