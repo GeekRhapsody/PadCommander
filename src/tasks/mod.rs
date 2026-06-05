@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, VecDeque},
-    fs as std_fs, io,
+    fs as std_fs,
+    io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -373,6 +374,28 @@ impl TaskManager {
         })
     }
 
+    pub fn spawn_copy_to_directory(
+        &mut self,
+        label: String,
+        sources: Vec<PathBuf>,
+        target_directory: PathBuf,
+    ) -> TaskId {
+        self.spawn_threaded(TaskKind::Copy, label, true, move |reporter| {
+            local_transfer_task(reporter, LocalTransferKind::Copy, sources, target_directory)
+        })
+    }
+
+    pub fn spawn_move_to_directory(
+        &mut self,
+        label: String,
+        sources: Vec<PathBuf>,
+        target_directory: PathBuf,
+    ) -> TaskId {
+        self.spawn_threaded(TaskKind::Move, label, true, move |reporter| {
+            local_transfer_task(reporter, LocalTransferKind::Move, sources, target_directory)
+        })
+    }
+
     pub fn spawn_synthetic_task(
         &mut self,
         kind: TaskKind,
@@ -716,6 +739,270 @@ fn synthetic_task(
     })
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LocalTransferKind {
+    Copy,
+    Move,
+}
+
+impl LocalTransferKind {
+    fn verb(self) -> &'static str {
+        match self {
+            LocalTransferKind::Copy => "Copying",
+            LocalTransferKind::Move => "Moving",
+        }
+    }
+}
+
+fn local_transfer_task(
+    reporter: TaskReporter,
+    kind: LocalTransferKind,
+    sources: Vec<PathBuf>,
+    target_directory: PathBuf,
+) -> TaskOutcome {
+    if sources.is_empty() {
+        return TaskOutcome::Failed("No items selected.".to_owned());
+    }
+
+    let plan = match LocalTransferPlan::new(sources, target_directory) {
+        Ok(plan) => plan,
+        Err(error) => return TaskOutcome::Failed(error),
+    };
+
+    reporter.progress(ProgressSnapshot {
+        current_file: Some(format!(
+            "{} into {}",
+            kind.verb(),
+            plan.target_directory.display()
+        )),
+        total_bytes: Some(plan.totals.bytes),
+        total_items: Some(plan.totals.items),
+        ..ProgressSnapshot::default()
+    });
+
+    let mut tracker = TransferProgressTracker::new(plan.totals);
+    for root in &plan.roots {
+        if reporter.is_cancelled() {
+            return TaskOutcome::Cancelled;
+        }
+
+        if let Err(error) = copy_path_recursive(&reporter, &mut tracker, &root.source, &root.target)
+        {
+            if error == TASK_CANCELLED_MESSAGE {
+                return TaskOutcome::Cancelled;
+            }
+            return TaskOutcome::Failed(error);
+        }
+    }
+
+    if kind == LocalTransferKind::Move {
+        for root in &plan.roots {
+            if reporter.is_cancelled() {
+                return TaskOutcome::Cancelled;
+            }
+
+            if let Err(error) = remove_source_after_move(&root.source) {
+                return TaskOutcome::Failed(error);
+            }
+        }
+    }
+
+    TaskOutcome::Succeeded(TaskCompletionData {
+        item_count: plan.roots.len(),
+        bytes_done: tracker.bytes_done,
+    })
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct LocalTransferPlan {
+    roots: Vec<LocalTransferRoot>,
+    target_directory: PathBuf,
+    totals: LocalTreeTotals,
+}
+
+impl LocalTransferPlan {
+    fn new(sources: Vec<PathBuf>, target_directory: PathBuf) -> Result<Self, String> {
+        if !target_directory.is_dir() {
+            return Err(format!(
+                "Target {} is not a directory.",
+                target_directory.display()
+            ));
+        }
+
+        let mut roots = Vec::new();
+        let mut totals = LocalTreeTotals::default();
+
+        for source in sources {
+            let file_name = source
+                .file_name()
+                .ok_or_else(|| format!("Cannot determine a name for {}.", source.display()))?;
+            let target = target_directory.join(file_name);
+
+            if target.exists() {
+                return Err(format!("{} already exists.", target.display()));
+            }
+
+            if source.is_dir() && target_directory.starts_with(&source) {
+                return Err(format!(
+                    "Cannot copy or move {} into itself.",
+                    source.display()
+                ));
+            }
+
+            let root_totals = local_path_totals(&source).map_err(|source_error| {
+                format!("Cannot scan {}: {source_error}", source.display())
+            })?;
+            totals.add(root_totals);
+            roots.push(LocalTransferRoot {
+                source,
+                target,
+                totals: root_totals,
+            });
+        }
+
+        Ok(Self {
+            roots,
+            target_directory,
+            totals,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct LocalTransferRoot {
+    source: PathBuf,
+    target: PathBuf,
+    totals: LocalTreeTotals,
+}
+
+struct TransferProgressTracker {
+    bytes_done: u64,
+    items_done: u64,
+    totals: LocalTreeTotals,
+}
+
+impl TransferProgressTracker {
+    fn new(totals: LocalTreeTotals) -> Self {
+        Self {
+            bytes_done: 0,
+            items_done: 0,
+            totals,
+        }
+    }
+
+    fn add_bytes(&mut self, bytes: u64) {
+        self.bytes_done = self.bytes_done.saturating_add(bytes);
+    }
+
+    fn finish_item(&mut self) {
+        self.items_done = self.items_done.saturating_add(1);
+    }
+
+    fn snapshot(&self, current_file: &Path) -> ProgressSnapshot {
+        ProgressSnapshot {
+            current_file: Some(current_file.display().to_string()),
+            bytes_done: self.bytes_done,
+            total_bytes: Some(self.totals.bytes),
+            items_done: self.items_done,
+            total_items: Some(self.totals.items),
+        }
+    }
+}
+
+fn copy_path_recursive(
+    reporter: &TaskReporter,
+    tracker: &mut TransferProgressTracker,
+    source: &Path,
+    target: &Path,
+) -> Result<(), String> {
+    if reporter.is_cancelled() {
+        return Err(TASK_CANCELLED_MESSAGE.to_owned());
+    }
+
+    let metadata = std_fs::symlink_metadata(source)
+        .map_err(|error| format!("Cannot read {}: {error}", source.display()))?;
+
+    if metadata.is_dir() {
+        std_fs::create_dir(target)
+            .map_err(|error| format!("Cannot create {}: {error}", target.display()))?;
+        tracker.finish_item();
+        reporter.progress(tracker.snapshot(source));
+
+        for entry in std_fs::read_dir(source)
+            .map_err(|error| format!("Cannot read {}: {error}", source.display()))?
+        {
+            let entry =
+                entry.map_err(|error| format!("Cannot read {}: {error}", source.display()))?;
+            copy_path_recursive(
+                reporter,
+                tracker,
+                &entry.path(),
+                &target.join(entry.file_name()),
+            )?;
+        }
+    } else if metadata.is_file() {
+        copy_file_with_progress(reporter, tracker, source, target)?;
+        tracker.finish_item();
+        reporter.progress(tracker.snapshot(source));
+    } else {
+        return Err(format!("Unsupported file type: {}.", source.display()));
+    }
+
+    Ok(())
+}
+
+fn copy_file_with_progress(
+    reporter: &TaskReporter,
+    tracker: &mut TransferProgressTracker,
+    source: &Path,
+    target: &Path,
+) -> Result<(), String> {
+    let mut input = std_fs::File::open(source)
+        .map_err(|error| format!("Cannot open {}: {error}", source.display()))?;
+    let mut output = std_fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(target)
+        .map_err(|error| format!("Cannot create {}: {error}", target.display()))?;
+    let mut buffer = [0u8; 64 * 1024];
+
+    loop {
+        if reporter.is_cancelled() {
+            return Err(TASK_CANCELLED_MESSAGE.to_owned());
+        }
+
+        let bytes_read = input
+            .read(&mut buffer)
+            .map_err(|error| format!("Cannot read {}: {error}", source.display()))?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        output
+            .write_all(&buffer[..bytes_read])
+            .map_err(|error| format!("Cannot write {}: {error}", target.display()))?;
+        tracker.add_bytes(bytes_read as u64);
+        reporter.progress(tracker.snapshot(source));
+    }
+
+    Ok(())
+}
+
+const TASK_CANCELLED_MESSAGE: &str = "Task cancelled.";
+
+fn remove_source_after_move(source: &Path) -> Result<(), String> {
+    let metadata = std_fs::symlink_metadata(source)
+        .map_err(|error| format!("Cannot read {}: {error}", source.display()))?;
+
+    if metadata.is_dir() {
+        std_fs::remove_dir_all(source)
+            .map_err(|error| format!("Cannot remove {}: {error}", source.display()))
+    } else {
+        std_fs::remove_file(source)
+            .map_err(|error| format!("Cannot remove {}: {error}", source.display()))
+    }
+}
+
 struct PlannedDelete {
     roots: Vec<LocalTreeRoot>,
     total_bytes: Option<u64>,
@@ -941,6 +1228,85 @@ mod tests {
     }
 
     #[test]
+    fn copy_task_copies_nested_local_tree() {
+        let root = unique_test_dir();
+        let source = root.join("source");
+        let target = root.join("target");
+        fs::create_dir_all(source.join("nested")).expect("create source tree");
+        fs::create_dir_all(&target).expect("create target dir");
+        write_bytes(&source.join("a.bin"), 3);
+        write_bytes(&source.join("nested").join("b.bin"), 5);
+
+        let mut manager = TaskManager::default();
+        let task_id =
+            manager.spawn_copy_to_directory("Copy test".to_owned(), vec![source.clone()], target);
+        let completion = wait_for_completion(&mut manager, task_id);
+
+        assert_eq!(completion.status, TaskStatus::Succeeded);
+        assert!(source.exists());
+        assert_eq!(
+            fs::read(root.join("target").join("source").join("a.bin")).expect("read a"),
+            vec![b'x'; 3]
+        );
+        assert_eq!(
+            fs::read(
+                root.join("target")
+                    .join("source")
+                    .join("nested")
+                    .join("b.bin")
+            )
+            .expect("read b"),
+            vec![b'x'; 5]
+        );
+
+        fs::remove_dir_all(&root).expect("remove test dir");
+    }
+
+    #[test]
+    fn move_task_copies_then_removes_source_tree() {
+        let root = unique_test_dir();
+        let source = root.join("move-source");
+        let target = root.join("move-target");
+        fs::create_dir_all(&source).expect("create source dir");
+        fs::create_dir_all(&target).expect("create target dir");
+        write_bytes(&source.join("moved.bin"), 7);
+
+        let mut manager = TaskManager::default();
+        let task_id =
+            manager.spawn_move_to_directory("Move test".to_owned(), vec![source.clone()], target);
+        let completion = wait_for_completion(&mut manager, task_id);
+
+        assert_eq!(completion.status, TaskStatus::Succeeded);
+        assert!(!source.exists());
+        assert_eq!(
+            fs::read(
+                root.join("move-target")
+                    .join("move-source")
+                    .join("moved.bin")
+            )
+            .expect("read moved file"),
+            vec![b'x'; 7]
+        );
+
+        fs::remove_dir_all(&root).expect("remove test dir");
+    }
+
+    #[test]
+    fn transfer_plan_rejects_existing_target() {
+        let root = unique_test_dir();
+        let source = root.join("source.txt");
+        let target = root.join("target");
+        fs::create_dir_all(&target).expect("create target dir");
+        write_bytes(&source, 3);
+        write_bytes(&target.join("source.txt"), 2);
+
+        let error = LocalTransferPlan::new(vec![source], target).expect_err("target conflict");
+
+        assert!(error.contains("already exists"));
+        fs::remove_dir_all(&root).expect("remove test dir");
+    }
+
+    #[test]
     fn local_tree_totals_include_nested_files_and_directories() {
         let root = unique_test_dir();
         fs::create_dir_all(root.join("nested")).expect("create nested dir");
@@ -972,5 +1338,20 @@ mod tests {
         let mut file = fs::File::create(path).expect("create test file");
         let bytes = vec![b'x'; len];
         file.write_all(&bytes).expect("write test file");
+    }
+
+    fn wait_for_completion(manager: &mut TaskManager, task_id: TaskId) -> TaskCompletion {
+        for _ in 0..100 {
+            if let Some(completion) = manager
+                .poll_completed()
+                .into_iter()
+                .find(|completion| completion.id == task_id)
+            {
+                return completion;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        panic!("task {task_id} did not complete");
     }
 }

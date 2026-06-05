@@ -2,7 +2,7 @@ use crate::{
     action::{CommanderAction, FocusDirection, TextInputAction, TextInputPurpose},
     fs::{self, LocalFileSystem, VirtualFileSystem},
     settings::Settings,
-    tasks::{TaskKind, TaskManager, TaskStatus},
+    tasks::{TaskId, TaskKind, TaskManager, TaskStatus},
 };
 
 use std::{
@@ -30,6 +30,7 @@ pub struct AppState {
     pub local_file_system: LocalFileSystem,
     pub task_manager: TaskManager,
     pub delete_task_panes: BTreeMap<u64, PaneSide>,
+    pub transfer_task_panes: BTreeMap<TaskId, Vec<PaneSide>>,
 }
 
 impl AppState {
@@ -48,6 +49,7 @@ impl AppState {
             local_file_system,
             task_manager: TaskManager::default(),
             delete_task_panes: BTreeMap::new(),
+            transfer_task_panes: BTreeMap::new(),
         };
 
         state.refresh_pane(PaneSide::Left);
@@ -184,6 +186,8 @@ impl AppState {
                 };
             }
             CommanderAction::Delete => self.begin_delete_confirmation(),
+            CommanderAction::CopyToOtherPane => self.start_transfer_task(TaskKind::Copy),
+            CommanderAction::MoveToOtherPane => self.start_transfer_task(TaskKind::Move),
             CommanderAction::StartDemoTask => self.start_demo_task(false),
             CommanderAction::StartFailingDemoTask => self.start_demo_task(true),
             CommanderAction::CancelActiveTask => {
@@ -191,9 +195,7 @@ impl AppState {
                     self.status = "No cancellable task is active.".to_owned();
                 }
             }
-            CommanderAction::CopyToOtherPane
-            | CommanderAction::MoveToOtherPane
-            | CommanderAction::DecompressToOtherPane
+            CommanderAction::DecompressToOtherPane
             | CommanderAction::UploadToOtherPane
             | CommanderAction::DownloadToOtherPane
             | CommanderAction::CreateShortcutInOtherPane => self.set_operation_todo_status(action),
@@ -229,6 +231,24 @@ impl AppState {
                     }
                     Ok(_) => {}
                 }
+            } else if let Some(sides) = self.transfer_task_panes.remove(&completion.id) {
+                for side in sides {
+                    self.refresh_pane(side);
+                }
+
+                match completion.status {
+                    TaskStatus::Succeeded => {
+                        self.status = format!("{} completed.", completion.label);
+                    }
+                    TaskStatus::Failed => {
+                        let error = completion.error_message().unwrap_or("unknown error");
+                        self.status = format!("{} failed: {error}", completion.label);
+                    }
+                    TaskStatus::Cancelled => {
+                        self.status = format!("{} cancelled.", completion.label);
+                    }
+                    TaskStatus::Queued | TaskStatus::Running => {}
+                }
             } else {
                 match completion.status {
                     TaskStatus::Succeeded => {
@@ -262,6 +282,13 @@ impl AppState {
         match side {
             PaneSide::Left => &mut self.left_pane,
             PaneSide::Right => &mut self.right_pane,
+        }
+    }
+
+    fn inactive_pane_side(&self) -> PaneSide {
+        match self.active_pane {
+            PaneSide::Left => PaneSide::Right,
+            PaneSide::Right => PaneSide::Left,
         }
     }
 
@@ -512,6 +539,62 @@ impl AppState {
             .spawn_delete_to_recycle_bin(label.clone(), paths);
         self.delete_task_panes.insert(task_id, confirm.pane);
         self.dialog = DialogState::None;
+        self.status = format!("{label} in background.");
+    }
+
+    fn start_transfer_task(&mut self, kind: TaskKind) {
+        let source_side = self.active_pane;
+        let target_side = self.inactive_pane_side();
+        let sources = self.active_operation_sources();
+        if sources.is_empty() {
+            self.status = format!("{}: no available source items.", kind.label());
+            return;
+        }
+
+        let target_location = self.pane(target_side).current_location.clone();
+        if target_location == fs::ROOTS_LOCATION {
+            self.status = format!(
+                "{}: choose a target folder in the other pane first.",
+                kind.label()
+            );
+            return;
+        }
+
+        let source_paths = sources
+            .iter()
+            .map(|entry| PathBuf::from(&entry.virtual_path))
+            .collect::<Vec<_>>();
+        let target_directory = PathBuf::from(&target_location);
+        let label = format!(
+            "{} {} item(s) to {}",
+            kind.label(),
+            source_paths.len(),
+            fs::location_label(&target_location)
+        );
+
+        let task_id = match kind {
+            TaskKind::Copy => self.task_manager.spawn_copy_to_directory(
+                label.clone(),
+                source_paths,
+                target_directory,
+            ),
+            TaskKind::Move => self.task_manager.spawn_move_to_directory(
+                label.clone(),
+                source_paths,
+                target_directory,
+            ),
+            _ => {
+                self.status = format!("{} is not a local transfer action.", kind.label());
+                return;
+            }
+        };
+
+        let refresh_sides = if kind == TaskKind::Move {
+            vec![source_side, target_side]
+        } else {
+            vec![target_side]
+        };
+        self.transfer_task_panes.insert(task_id, refresh_sides);
         self.status = format!("{label} in background.");
     }
 
@@ -889,8 +972,9 @@ impl Default for CommandMenuState {
             focused_index: 0,
             entries: vec![
                 CommandMenuEntry::new("Create Folder", CommanderAction::CreateFolder),
-                CommandMenuEntry::new("Create File", CommanderAction::CreateFile),
                 CommandMenuEntry::new("Create Text File", CommanderAction::CreateTextFile),
+                CommandMenuEntry::new("Copy", CommanderAction::CopyToOtherPane),
+                CommandMenuEntry::new("Move", CommanderAction::MoveToOtherPane),
                 CommandMenuEntry::new("Rename", CommanderAction::Rename),
                 CommandMenuEntry::new("Delete", CommanderAction::Delete),
                 CommandMenuEntry::new("Task Demo", CommanderAction::StartDemoTask),
@@ -1466,6 +1550,7 @@ mod tests {
             local_file_system: LocalFileSystem,
             task_manager: TaskManager::default(),
             delete_task_panes: BTreeMap::new(),
+            transfer_task_panes: BTreeMap::new(),
         }
     }
 
@@ -1617,5 +1702,67 @@ mod tests {
                 value: "notes".to_owned()
             }
         );
+    }
+
+    #[test]
+    fn copy_to_other_pane_starts_background_transfer() {
+        let root = unique_test_dir();
+        let source_dir = root.join("source");
+        let target_dir = root.join("target");
+        std::fs::create_dir_all(&source_dir).expect("create source dir");
+        std::fs::create_dir_all(&target_dir).expect("create target dir");
+        let source_file = source_dir.join("copy-me.txt");
+        std::fs::write(&source_file, b"copy").expect("write source file");
+
+        let mut state = test_state();
+        state.left_pane.current_location = source_dir.to_string_lossy().to_string();
+        state.left_pane.entries = vec![FileEntry {
+            display_name: "copy-me.txt".to_owned(),
+            virtual_path: source_file.to_string_lossy().to_string(),
+            kind: FileEntryKind::File,
+            size: Some(4),
+            modified: None,
+            flags: FileEntryFlags::default(),
+        }];
+        state.left_pane.selected_index = 0;
+        state.right_pane.current_location = target_dir.to_string_lossy().to_string();
+        state.active_pane = PaneSide::Left;
+
+        state.dispatch_action(CommanderAction::CopyToOtherPane);
+
+        assert_eq!(state.transfer_task_panes.len(), 1);
+        assert!(state.status.contains("in background"));
+        assert!(!state.status.contains("would use"));
+
+        wait_for_state_tasks(&mut state);
+        assert_eq!(
+            std::fs::read(target_dir.join("copy-me.txt")).expect("read copied file"),
+            b"copy"
+        );
+
+        std::fs::remove_dir_all(&root).expect("remove test dir");
+    }
+
+    fn unique_test_dir() -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "handheld_commander_state_test_{timestamp}_{}",
+            std::process::id()
+        ))
+    }
+
+    fn wait_for_state_tasks(state: &mut AppState) {
+        for _ in 0..100 {
+            state.poll_tasks();
+            if state.transfer_task_panes.is_empty() && state.delete_task_panes.is_empty() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        panic!("state task did not complete");
     }
 }
