@@ -35,7 +35,9 @@ impl eframe::App for HandheldCommanderApp {
         let ctx = ui.ctx().clone();
         apply_ui_scale(&ctx, self.state.settings.ui_scale);
 
-        let mut actions = self.input_manager.collect_actions(&ctx);
+        let mut actions = self
+            .input_manager
+            .collect_actions(&ctx, self.state.text_dialog_is_open());
         actions.extend(crate::ui::show(ui, &self.state));
 
         for action in actions {

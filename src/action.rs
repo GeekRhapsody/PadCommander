@@ -50,7 +50,14 @@ pub enum TextInputAction {
     Insert(String),
     Backspace,
     Clear,
+    CursorLeft,
+    CursorRight,
+    MoveKeyFocus(FocusDirection),
+    PressFocusedKey,
+    ToggleShift,
+    ToggleSymbols,
     Submit,
+    Cancel,
 }
 
 #[allow(dead_code)]
@@ -61,4 +68,14 @@ pub enum TextInputPurpose {
     CreateTextFile,
     Rename,
     ConnectFtp,
+    ArchiveName,
+    FtpProfileField,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FocusDirection {
+    Up,
+    Down,
+    Left,
+    Right,
 }

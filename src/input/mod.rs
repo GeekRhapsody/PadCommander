@@ -2,7 +2,7 @@ use eframe::egui;
 use gilrs::{Button, EventType, GamepadId, Gilrs};
 use std::time::{Duration, Instant};
 
-use crate::action::CommanderAction;
+use crate::action::{CommanderAction, FocusDirection, TextInputAction};
 
 pub const GAMEPAD_POLL_INTERVAL: Duration = Duration::from_millis(16);
 
@@ -22,10 +22,14 @@ impl InputManager {
         }
     }
 
-    pub fn collect_actions(&mut self, ctx: &egui::Context) -> Vec<CommanderAction> {
+    pub fn collect_actions(
+        &mut self,
+        ctx: &egui::Context,
+        text_input_active: bool,
+    ) -> Vec<CommanderAction> {
         let now = Instant::now();
-        let mut actions = self.keyboard.collect_actions(ctx, now);
-        actions.extend(self.gamepad.poll_actions(now));
+        let mut actions = self.keyboard.collect_actions(ctx, now, text_input_active);
+        actions.extend(self.gamepad.poll_actions(now, text_input_active));
         actions
     }
 }
@@ -37,9 +41,63 @@ struct KeyboardInputManager {
 }
 
 impl KeyboardInputManager {
-    fn collect_actions(&mut self, ctx: &egui::Context, now: Instant) -> Vec<CommanderAction> {
+    fn collect_actions(
+        &mut self,
+        ctx: &egui::Context,
+        now: Instant,
+        text_input_active: bool,
+    ) -> Vec<CommanderAction> {
         ctx.input(|input| {
             let mut actions = Vec::new();
+
+            if text_input_active {
+                for event in &input.events {
+                    if let egui::Event::Text(text) = event
+                        && !text.is_empty()
+                    {
+                        actions.push(CommanderAction::TextInput(TextInputAction::Insert(
+                            text.clone(),
+                        )));
+                    }
+                }
+
+                actions.extend(self.arrow_up.update(
+                    input.key_down(egui::Key::ArrowUp),
+                    now,
+                    CommanderAction::TextInput(TextInputAction::MoveKeyFocus(FocusDirection::Up)),
+                ));
+                actions.extend(self.arrow_down.update(
+                    input.key_down(egui::Key::ArrowDown),
+                    now,
+                    CommanderAction::TextInput(TextInputAction::MoveKeyFocus(FocusDirection::Down)),
+                ));
+
+                if input.key_pressed(egui::Key::ArrowLeft) {
+                    actions.push(CommanderAction::TextInput(TextInputAction::CursorLeft));
+                }
+
+                if input.key_pressed(egui::Key::ArrowRight) {
+                    actions.push(CommanderAction::TextInput(TextInputAction::CursorRight));
+                }
+
+                if input.key_pressed(egui::Key::Backspace) {
+                    actions.push(CommanderAction::TextInput(TextInputAction::Backspace));
+                }
+
+                if input.key_pressed(egui::Key::Enter) {
+                    actions.push(CommanderAction::TextInput(TextInputAction::Submit));
+                }
+
+                if input.key_pressed(egui::Key::Escape) {
+                    actions.push(CommanderAction::TextInput(TextInputAction::Cancel));
+                }
+
+                if input.modifiers.ctrl && input.key_pressed(egui::Key::Q) {
+                    actions.push(CommanderAction::QuitDevelopment);
+                }
+
+                return actions;
+            }
 
             actions.extend(self.arrow_up.update(
                 input.key_down(egui::Key::ArrowUp),
@@ -130,8 +188,12 @@ pub struct GamepadInputManager {
     active_gamepad: Option<GamepadId>,
     dpad_up_held: bool,
     dpad_down_held: bool,
+    dpad_left_held: bool,
+    dpad_right_held: bool,
     dpad_up: RepeatState,
     dpad_down: RepeatState,
+    dpad_left: RepeatState,
+    dpad_right: RepeatState,
 }
 
 impl GamepadInputManager {
@@ -141,12 +203,16 @@ impl GamepadInputManager {
             active_gamepad: None,
             dpad_up_held: false,
             dpad_down_held: false,
+            dpad_left_held: false,
+            dpad_right_held: false,
             dpad_up: RepeatState::default(),
             dpad_down: RepeatState::default(),
+            dpad_left: RepeatState::default(),
+            dpad_right: RepeatState::default(),
         }
     }
 
-    pub fn poll_actions(&mut self, now: Instant) -> Vec<CommanderAction> {
+    pub fn poll_actions(&mut self, now: Instant, text_input_active: bool) -> Vec<CommanderAction> {
         let mut actions = Vec::new();
 
         let events = if let Some(gilrs) = &mut self.gilrs {
@@ -166,8 +232,20 @@ impl GamepadInputManager {
             match event.event {
                 EventType::ButtonPressed(button, _) => {
                     self.set_dpad_hold(button, true);
-                    if !matches!(button, Button::DPadUp | Button::DPadDown) {
-                        actions.extend(action_for_button(button));
+                    let repeated_dpad = if text_input_active {
+                        matches!(
+                            button,
+                            Button::DPadUp
+                                | Button::DPadDown
+                                | Button::DPadLeft
+                                | Button::DPadRight
+                        )
+                    } else {
+                        matches!(button, Button::DPadUp | Button::DPadDown)
+                    };
+
+                    if !repeated_dpad {
+                        actions.extend(action_for_button(button, text_input_active));
                     }
                 }
                 EventType::ButtonReleased(button, _) => {
@@ -177,6 +255,8 @@ impl GamepadInputManager {
                     self.active_gamepad = None;
                     self.dpad_up_held = false;
                     self.dpad_down_held = false;
+                    self.dpad_left_held = false;
+                    self.dpad_right_held = false;
                 }
                 EventType::Disconnected => {}
                 EventType::Connected => {
@@ -186,16 +266,39 @@ impl GamepadInputManager {
             }
         }
 
-        actions.extend(self.dpad_up.update(
-            self.dpad_up_held,
-            now,
-            CommanderAction::MoveSelectionUp,
-        ));
-        actions.extend(self.dpad_down.update(
-            self.dpad_down_held,
-            now,
-            CommanderAction::MoveSelectionDown,
-        ));
+        if text_input_active {
+            actions.extend(self.dpad_up.update(
+                self.dpad_up_held,
+                now,
+                CommanderAction::TextInput(TextInputAction::MoveKeyFocus(FocusDirection::Up)),
+            ));
+            actions.extend(self.dpad_down.update(
+                self.dpad_down_held,
+                now,
+                CommanderAction::TextInput(TextInputAction::MoveKeyFocus(FocusDirection::Down)),
+            ));
+            actions.extend(self.dpad_left.update(
+                self.dpad_left_held,
+                now,
+                CommanderAction::TextInput(TextInputAction::MoveKeyFocus(FocusDirection::Left)),
+            ));
+            actions.extend(self.dpad_right.update(
+                self.dpad_right_held,
+                now,
+                CommanderAction::TextInput(TextInputAction::MoveKeyFocus(FocusDirection::Right)),
+            ));
+        } else {
+            actions.extend(self.dpad_up.update(
+                self.dpad_up_held,
+                now,
+                CommanderAction::MoveSelectionUp,
+            ));
+            actions.extend(self.dpad_down.update(
+                self.dpad_down_held,
+                now,
+                CommanderAction::MoveSelectionDown,
+            ));
+        }
 
         actions
     }
@@ -204,12 +307,25 @@ impl GamepadInputManager {
         match button {
             Button::DPadUp => self.dpad_up_held = is_held,
             Button::DPadDown => self.dpad_down_held = is_held,
+            Button::DPadLeft => self.dpad_left_held = is_held,
+            Button::DPadRight => self.dpad_right_held = is_held,
             _ => {}
         }
     }
 }
 
-fn action_for_button(button: Button) -> Option<CommanderAction> {
+fn action_for_button(button: Button, text_input_active: bool) -> Option<CommanderAction> {
+    if text_input_active {
+        return match button {
+            Button::South => Some(CommanderAction::TextInput(TextInputAction::PressFocusedKey)),
+            Button::East => Some(CommanderAction::TextInput(TextInputAction::Cancel)),
+            Button::West => Some(CommanderAction::TextInput(TextInputAction::Backspace)),
+            Button::North => Some(CommanderAction::TextInput(TextInputAction::ToggleSymbols)),
+            Button::Start => Some(CommanderAction::TextInput(TextInputAction::Submit)),
+            _ => None,
+        };
+    }
+
     match button {
         Button::DPadLeft | Button::DPadRight | Button::LeftTrigger | Button::RightTrigger => {
             Some(CommanderAction::SwitchPane)

@@ -1,5 +1,6 @@
 pub mod action_bar;
 pub mod panes;
+pub mod text_input;
 
 use eframe::egui;
 
@@ -27,6 +28,7 @@ pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<CommanderAction> {
         .show_inside(ui, |ui| panes::show(ui, state, &mut actions));
 
     input_help_overlay(ui.ctx(), state);
+    text_input::show(ui.ctx(), state, &mut actions);
     modal_overlay(ui.ctx(), state);
 
     actions
@@ -62,8 +64,7 @@ fn header(ui: &mut egui::Ui, state: &AppState) {
 fn modal_overlay(ctx: &egui::Context, state: &AppState) {
     let (title, message) = match &state.dialog {
         DialogState::Message { title, message } => (title.as_str(), message.as_str()),
-        DialogState::TextInput { title, value } => (title.as_str(), value.as_str()),
-        DialogState::None => return,
+        DialogState::None | DialogState::TextInput(_) => return,
     };
 
     let screen_rect = ctx.content_rect();
@@ -159,6 +160,11 @@ fn mapping_grid(ui: &mut egui::Ui) {
             mapping_row(ui, "Mark item", "future shortcut", "X");
             mapping_row(ui, "Favourites", "future shortcut", "Y");
             mapping_row(ui, "Settings", "future shortcut", "Start / Menu");
+            mapping_row(ui, "Text modal focus", "Arrow keys", "D-pad");
+            mapping_row(ui, "Text modal key", "Type / Enter", "A");
+            mapping_row(ui, "Text modal edit", "Backspace / Esc", "X / B");
+            mapping_row(ui, "Text modal layer", "on-screen button", "Y");
+            mapping_row(ui, "Text modal confirm", "Enter", "Start");
             mapping_row(ui, "Quit development", "Ctrl+Q", "none");
         });
 }

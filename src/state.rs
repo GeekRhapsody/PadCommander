@@ -1,5 +1,5 @@
 use crate::{
-    action::{CommanderAction, TextInputAction},
+    action::{CommanderAction, FocusDirection, TextInputAction, TextInputPurpose},
     fs::{self, LocalFileSystem, VirtualFileSystem},
     settings::Settings,
     tasks::TaskManager,
@@ -98,6 +98,8 @@ impl AppState {
                 if self.show_input_help {
                     self.show_input_help = false;
                     self.status = "Input help closed.".to_owned();
+                } else if self.text_dialog_is_open() {
+                    self.handle_text_input(TextInputAction::Cancel);
                 } else if self.dialog != DialogState::None {
                     self.dialog = DialogState::None;
                     self.status = "Cancelled.".to_owned();
@@ -108,7 +110,9 @@ impl AppState {
                 }
             }
             CommanderAction::Confirm => {
-                if self.dialog != DialogState::None {
+                if self.text_dialog_is_open() {
+                    self.handle_text_input(TextInputAction::Submit);
+                } else if self.dialog != DialogState::None {
                     self.dialog = DialogState::None;
                     self.status = "Confirmed placeholder dialog.".to_owned();
                 } else {
@@ -122,11 +126,29 @@ impl AppState {
                 };
                 self.status = "Settings are reserved for a future milestone.".to_owned();
             }
-            CommanderAction::CreateFolder => self.begin_text_input("Create Folder"),
-            CommanderAction::CreateFile => self.begin_text_input("Create File"),
-            CommanderAction::CreateTextFile => self.begin_text_input("Create Text File"),
-            CommanderAction::Rename => self.begin_text_input("Rename"),
-            CommanderAction::ConnectFtp => self.begin_text_input("Connect FTP"),
+            CommanderAction::CreateFolder => {
+                self.begin_text_input(TextInputPurpose::CreateFolder, String::new())
+            }
+            CommanderAction::CreateFile => {
+                self.begin_text_input(TextInputPurpose::CreateFile, String::new())
+            }
+            CommanderAction::CreateTextFile => {
+                self.begin_text_input(TextInputPurpose::CreateTextFile, String::new())
+            }
+            CommanderAction::Rename => {
+                let initial_value = self
+                    .active_pane()
+                    .selected_markable_entry()
+                    .map(|entry| entry.display_name.clone())
+                    .unwrap_or_default();
+                self.begin_text_input(TextInputPurpose::Rename, initial_value);
+            }
+            CommanderAction::ConnectFtp => {
+                self.begin_text_input(TextInputPurpose::ConnectFtp, String::new())
+            }
+            CommanderAction::CompressToOtherPane => {
+                self.begin_text_input(TextInputPurpose::ArchiveName, String::new())
+            }
             CommanderAction::OpenFavourites => {
                 self.status = "Favourites are reserved for a future milestone.".to_owned();
             }
@@ -151,7 +173,6 @@ impl AppState {
             CommanderAction::CopyToOtherPane
             | CommanderAction::MoveToOtherPane
             | CommanderAction::Delete
-            | CommanderAction::CompressToOtherPane
             | CommanderAction::DecompressToOtherPane
             | CommanderAction::UploadToOtherPane
             | CommanderAction::DownloadToOtherPane
@@ -271,24 +292,47 @@ impl AppState {
     }
 
     fn handle_text_input(&mut self, text_action: TextInputAction) {
-        self.status = match text_action {
-            TextInputAction::Begin { purpose, .. } => {
-                format!("{purpose:?} text input is reserved for the on-screen keyboard milestone.")
+        match text_action {
+            TextInputAction::Begin {
+                purpose,
+                initial_value,
+            } => self.begin_text_input(purpose, initial_value),
+            TextInputAction::Cancel => {
+                self.dialog = DialogState::None;
+                self.status = "Text input cancelled.".to_owned();
             }
-            TextInputAction::Insert(_) => "Text entry is not active yet.".to_owned(),
-            TextInputAction::Backspace => "Text entry is not active yet.".to_owned(),
-            TextInputAction::Clear => "Text entry is not active yet.".to_owned(),
-            TextInputAction::Submit => "Text entry is not active yet.".to_owned(),
-        };
+            action => {
+                let Some(dialog) = self.text_dialog_mut() else {
+                    self.status = "Text entry is not active.".to_owned();
+                    return;
+                };
+
+                match dialog.apply_action(action) {
+                    TextInputOutcome::Editing => {
+                        self.status = "Editing text.".to_owned();
+                    }
+                    TextInputOutcome::Cancelled => {
+                        self.dialog = DialogState::None;
+                        self.status = "Text input cancelled.".to_owned();
+                    }
+                    TextInputOutcome::Blocked(error) => {
+                        self.status = error;
+                    }
+                    TextInputOutcome::Submitted { purpose, value } => {
+                        let title = purpose.title();
+                        self.dialog = DialogState::None;
+                        self.status =
+                            format!("{title} value '{value}' captured for a future milestone.");
+                    }
+                }
+            }
+        }
     }
 
-    fn begin_text_input(&mut self, title: &str) {
-        self.dialog = DialogState::TextInput {
-            title: title.to_owned(),
-            value: String::new(),
-        };
-        self.status =
-            format!("{title} text input is reserved for the on-screen keyboard milestone.");
+    fn begin_text_input(&mut self, purpose: TextInputPurpose, initial_value: String) {
+        let title = purpose.title();
+        self.dialog = DialogState::TextInput(TextInputDialogState::new(purpose, initial_value));
+        self.status = format!("{title} text input opened.");
     }
 
     fn set_todo_status(&mut self, action: CommanderAction) {
@@ -365,6 +409,17 @@ impl AppState {
 
     pub fn active_operation_sources(&self) -> Vec<FileEntry> {
         self.active_pane().operation_sources()
+    }
+
+    pub fn text_dialog_is_open(&self) -> bool {
+        matches!(self.dialog, DialogState::TextInput(_))
+    }
+
+    fn text_dialog_mut(&mut self) -> Option<&mut TextInputDialogState> {
+        match &mut self.dialog {
+            DialogState::TextInput(dialog) => Some(dialog),
+            DialogState::None | DialogState::Message { .. } => None,
+        }
     }
 }
 
@@ -620,7 +675,462 @@ pub enum PaneLoadState {
 pub enum DialogState {
     None,
     Message { title: String, message: String },
-    TextInput { title: String, value: String },
+    TextInput(TextInputDialogState),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TextInputDialogState {
+    pub purpose: TextInputPurpose,
+    pub title: String,
+    pub value: String,
+    pub cursor: usize,
+    pub layer: KeyboardLayer,
+    pub focused_row: usize,
+    pub focused_col: usize,
+    pub validation_error: Option<String>,
+}
+
+impl TextInputDialogState {
+    pub fn new(purpose: TextInputPurpose, initial_value: String) -> Self {
+        let mut dialog = Self {
+            purpose,
+            title: purpose.title().to_owned(),
+            cursor: initial_value.chars().count(),
+            value: initial_value,
+            layer: KeyboardLayer::Lowercase,
+            focused_row: 0,
+            focused_col: 0,
+            validation_error: None,
+        };
+        dialog.validate();
+        dialog
+    }
+
+    pub fn apply_action(&mut self, action: TextInputAction) -> TextInputOutcome {
+        self.validation_error = None;
+
+        match action {
+            TextInputAction::Begin { .. } | TextInputAction::Cancel => TextInputOutcome::Editing,
+            TextInputAction::Insert(text) => {
+                self.insert_text(&text);
+                self.validate();
+                TextInputOutcome::Editing
+            }
+            TextInputAction::Backspace => {
+                self.backspace();
+                self.validate();
+                TextInputOutcome::Editing
+            }
+            TextInputAction::Clear => {
+                self.value.clear();
+                self.cursor = 0;
+                self.validate();
+                TextInputOutcome::Editing
+            }
+            TextInputAction::CursorLeft => {
+                self.cursor = self.cursor.saturating_sub(1);
+                TextInputOutcome::Editing
+            }
+            TextInputAction::CursorRight => {
+                self.cursor = (self.cursor + 1).min(self.value.chars().count());
+                TextInputOutcome::Editing
+            }
+            TextInputAction::MoveKeyFocus(direction) => {
+                self.move_key_focus(direction);
+                TextInputOutcome::Editing
+            }
+            TextInputAction::PressFocusedKey => self.press_focused_key(),
+            TextInputAction::ToggleShift => {
+                self.layer = match self.layer {
+                    KeyboardLayer::Lowercase => KeyboardLayer::Uppercase,
+                    KeyboardLayer::Uppercase => KeyboardLayer::Lowercase,
+                    KeyboardLayer::Symbols => KeyboardLayer::Uppercase,
+                };
+                self.clamp_focus();
+                TextInputOutcome::Editing
+            }
+            TextInputAction::ToggleSymbols => {
+                self.layer = match self.layer {
+                    KeyboardLayer::Lowercase => KeyboardLayer::Uppercase,
+                    KeyboardLayer::Uppercase => KeyboardLayer::Symbols,
+                    KeyboardLayer::Symbols => KeyboardLayer::Lowercase,
+                };
+                self.clamp_focus();
+                TextInputOutcome::Editing
+            }
+            TextInputAction::Submit => self.submit(),
+        }
+    }
+
+    pub fn keys(&self) -> &'static [&'static [OnScreenKey]] {
+        self.layer.keys()
+    }
+
+    pub fn focused_key(&self) -> OnScreenKey {
+        let row = self.keys()[self.focused_row];
+        row[self.focused_col.min(row.len() - 1)]
+    }
+
+    pub fn display_value_with_cursor(&self) -> String {
+        let mut rendered = String::new();
+        for (index, ch) in self.value.chars().enumerate() {
+            if index == self.cursor {
+                rendered.push('|');
+            }
+            rendered.push(ch);
+        }
+        if self.cursor == self.value.chars().count() {
+            rendered.push('|');
+        }
+        rendered
+    }
+
+    fn press_focused_key(&mut self) -> TextInputOutcome {
+        match self.focused_key() {
+            OnScreenKey::Text(text) => self.apply_action(TextInputAction::Insert(text.to_owned())),
+            OnScreenKey::Space => self.apply_action(TextInputAction::Insert(" ".to_owned())),
+            OnScreenKey::Backspace => self.apply_action(TextInputAction::Backspace),
+            OnScreenKey::Clear => self.apply_action(TextInputAction::Clear),
+            OnScreenKey::CursorLeft => self.apply_action(TextInputAction::CursorLeft),
+            OnScreenKey::CursorRight => self.apply_action(TextInputAction::CursorRight),
+            OnScreenKey::Shift => self.apply_action(TextInputAction::ToggleShift),
+            OnScreenKey::Symbols => self.apply_action(TextInputAction::ToggleSymbols),
+            OnScreenKey::Confirm => self.apply_action(TextInputAction::Submit),
+            OnScreenKey::Cancel => TextInputOutcome::Cancelled,
+        }
+    }
+
+    fn submit(&mut self) -> TextInputOutcome {
+        self.validate();
+        if let Some(error) = &self.validation_error {
+            return TextInputOutcome::Blocked(error.clone());
+        }
+
+        TextInputOutcome::Submitted {
+            purpose: self.purpose,
+            value: self.value.trim().to_owned(),
+        }
+    }
+
+    fn insert_text(&mut self, text: &str) {
+        let byte_index = char_to_byte_index(&self.value, self.cursor);
+        self.value.insert_str(byte_index, text);
+        self.cursor += text.chars().count();
+    }
+
+    fn backspace(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+
+        let start = char_to_byte_index(&self.value, self.cursor - 1);
+        let end = char_to_byte_index(&self.value, self.cursor);
+        self.value.replace_range(start..end, "");
+        self.cursor -= 1;
+    }
+
+    fn move_key_focus(&mut self, direction: FocusDirection) {
+        match direction {
+            FocusDirection::Up => {
+                self.focused_row = self.focused_row.saturating_sub(1);
+            }
+            FocusDirection::Down => {
+                self.focused_row = (self.focused_row + 1).min(self.keys().len() - 1);
+            }
+            FocusDirection::Left => {
+                self.focused_col = self.focused_col.saturating_sub(1);
+            }
+            FocusDirection::Right => {
+                self.focused_col =
+                    (self.focused_col + 1).min(self.keys()[self.focused_row].len() - 1);
+            }
+        }
+        self.clamp_focus();
+    }
+
+    fn clamp_focus(&mut self) {
+        self.focused_row = self.focused_row.min(self.keys().len() - 1);
+        self.focused_col = self
+            .focused_col
+            .min(self.keys()[self.focused_row].len() - 1);
+    }
+
+    fn validate(&mut self) {
+        self.validation_error = validate_text_input(self.purpose, &self.value);
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KeyboardLayer {
+    Lowercase,
+    Uppercase,
+    Symbols,
+}
+
+impl KeyboardLayer {
+    fn keys(self) -> &'static [&'static [OnScreenKey]] {
+        match self {
+            KeyboardLayer::Lowercase => LOWERCASE_KEYS,
+            KeyboardLayer::Uppercase => UPPERCASE_KEYS,
+            KeyboardLayer::Symbols => SYMBOL_KEYS,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OnScreenKey {
+    Text(&'static str),
+    Space,
+    Backspace,
+    Clear,
+    CursorLeft,
+    CursorRight,
+    Shift,
+    Symbols,
+    Confirm,
+    Cancel,
+}
+
+impl OnScreenKey {
+    pub fn label(self) -> &'static str {
+        match self {
+            OnScreenKey::Text(text) => text,
+            OnScreenKey::Space => "Space",
+            OnScreenKey::Backspace => "Back",
+            OnScreenKey::Clear => "Clear",
+            OnScreenKey::CursorLeft => "<",
+            OnScreenKey::CursorRight => ">",
+            OnScreenKey::Shift => "Shift",
+            OnScreenKey::Symbols => "Sym",
+            OnScreenKey::Confirm => "OK",
+            OnScreenKey::Cancel => "Cancel",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TextInputOutcome {
+    Editing,
+    Cancelled,
+    Blocked(String),
+    Submitted {
+        purpose: TextInputPurpose,
+        value: String,
+    },
+}
+
+impl TextInputPurpose {
+    pub fn title(self) -> &'static str {
+        match self {
+            TextInputPurpose::CreateFolder => "Create Folder",
+            TextInputPurpose::CreateFile => "Create File",
+            TextInputPurpose::CreateTextFile => "Create Text File",
+            TextInputPurpose::Rename => "Rename",
+            TextInputPurpose::ConnectFtp => "Connect FTP",
+            TextInputPurpose::ArchiveName => "Archive Name",
+            TextInputPurpose::FtpProfileField => "FTP Profile Field",
+        }
+    }
+
+    fn uses_windows_filename_validation(self) -> bool {
+        matches!(
+            self,
+            TextInputPurpose::CreateFolder
+                | TextInputPurpose::CreateFile
+                | TextInputPurpose::CreateTextFile
+                | TextInputPurpose::Rename
+                | TextInputPurpose::ArchiveName
+        )
+    }
+}
+
+const LOWERCASE_KEYS: &[&[OnScreenKey]] = &[
+    &[
+        OnScreenKey::Text("q"),
+        OnScreenKey::Text("w"),
+        OnScreenKey::Text("e"),
+        OnScreenKey::Text("r"),
+        OnScreenKey::Text("t"),
+        OnScreenKey::Text("y"),
+        OnScreenKey::Text("u"),
+        OnScreenKey::Text("i"),
+        OnScreenKey::Text("o"),
+        OnScreenKey::Text("p"),
+    ],
+    &[
+        OnScreenKey::Text("a"),
+        OnScreenKey::Text("s"),
+        OnScreenKey::Text("d"),
+        OnScreenKey::Text("f"),
+        OnScreenKey::Text("g"),
+        OnScreenKey::Text("h"),
+        OnScreenKey::Text("j"),
+        OnScreenKey::Text("k"),
+        OnScreenKey::Text("l"),
+    ],
+    &[
+        OnScreenKey::Shift,
+        OnScreenKey::Text("z"),
+        OnScreenKey::Text("x"),
+        OnScreenKey::Text("c"),
+        OnScreenKey::Text("v"),
+        OnScreenKey::Text("b"),
+        OnScreenKey::Text("n"),
+        OnScreenKey::Text("m"),
+        OnScreenKey::Backspace,
+    ],
+    &[
+        OnScreenKey::Symbols,
+        OnScreenKey::CursorLeft,
+        OnScreenKey::Space,
+        OnScreenKey::CursorRight,
+        OnScreenKey::Clear,
+        OnScreenKey::Cancel,
+        OnScreenKey::Confirm,
+    ],
+];
+
+const UPPERCASE_KEYS: &[&[OnScreenKey]] = &[
+    &[
+        OnScreenKey::Text("Q"),
+        OnScreenKey::Text("W"),
+        OnScreenKey::Text("E"),
+        OnScreenKey::Text("R"),
+        OnScreenKey::Text("T"),
+        OnScreenKey::Text("Y"),
+        OnScreenKey::Text("U"),
+        OnScreenKey::Text("I"),
+        OnScreenKey::Text("O"),
+        OnScreenKey::Text("P"),
+    ],
+    &[
+        OnScreenKey::Text("A"),
+        OnScreenKey::Text("S"),
+        OnScreenKey::Text("D"),
+        OnScreenKey::Text("F"),
+        OnScreenKey::Text("G"),
+        OnScreenKey::Text("H"),
+        OnScreenKey::Text("J"),
+        OnScreenKey::Text("K"),
+        OnScreenKey::Text("L"),
+    ],
+    &[
+        OnScreenKey::Shift,
+        OnScreenKey::Text("Z"),
+        OnScreenKey::Text("X"),
+        OnScreenKey::Text("C"),
+        OnScreenKey::Text("V"),
+        OnScreenKey::Text("B"),
+        OnScreenKey::Text("N"),
+        OnScreenKey::Text("M"),
+        OnScreenKey::Backspace,
+    ],
+    LOWERCASE_KEYS[3],
+];
+
+const SYMBOL_KEYS: &[&[OnScreenKey]] = &[
+    &[
+        OnScreenKey::Text("1"),
+        OnScreenKey::Text("2"),
+        OnScreenKey::Text("3"),
+        OnScreenKey::Text("4"),
+        OnScreenKey::Text("5"),
+        OnScreenKey::Text("6"),
+        OnScreenKey::Text("7"),
+        OnScreenKey::Text("8"),
+        OnScreenKey::Text("9"),
+        OnScreenKey::Text("0"),
+    ],
+    &[
+        OnScreenKey::Text("-"),
+        OnScreenKey::Text("_"),
+        OnScreenKey::Text("."),
+        OnScreenKey::Text(","),
+        OnScreenKey::Text(":"),
+        OnScreenKey::Text("/"),
+        OnScreenKey::Text("\\"),
+        OnScreenKey::Text("("),
+        OnScreenKey::Text(")"),
+    ],
+    &[
+        OnScreenKey::Symbols,
+        OnScreenKey::Text("#"),
+        OnScreenKey::Text("@"),
+        OnScreenKey::Text("+"),
+        OnScreenKey::Text("="),
+        OnScreenKey::Text("!"),
+        OnScreenKey::Text("&"),
+        OnScreenKey::Text(";"),
+        OnScreenKey::Backspace,
+    ],
+    LOWERCASE_KEYS[3],
+];
+
+fn validate_text_input(purpose: TextInputPurpose, value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Some("Name cannot be empty.".to_owned());
+    }
+
+    if purpose.uses_windows_filename_validation() {
+        validate_windows_filename(trimmed)
+    } else {
+        None
+    }
+}
+
+fn validate_windows_filename(value: &str) -> Option<String> {
+    const INVALID_CHARS: [char; 9] = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
+    if let Some(ch) = value.chars().find(|ch| INVALID_CHARS.contains(ch)) {
+        return Some(format!("Windows filenames cannot contain '{ch}'."));
+    }
+
+    if value.ends_with('.') || value.ends_with(' ') {
+        return Some("Windows filenames cannot end with a space or period.".to_owned());
+    }
+
+    let stem = value
+        .split('.')
+        .next()
+        .unwrap_or(value)
+        .to_ascii_uppercase();
+    if matches!(
+        stem.as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    ) {
+        return Some(format!("'{value}' is a reserved Windows filename."));
+    }
+
+    None
+}
+
+fn char_to_byte_index(value: &str, char_index: usize) -> usize {
+    value
+        .char_indices()
+        .nth(char_index)
+        .map(|(index, _)| index)
+        .unwrap_or(value.len())
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -784,5 +1294,43 @@ mod tests {
         assert_eq!(pane.selected_index, 1);
         assert!(pane.marked_items.contains("c"));
         assert!(!pane.marked_items.contains("missing"));
+    }
+
+    #[test]
+    fn text_dialog_inserts_at_cursor_and_backspaces() {
+        let mut dialog = TextInputDialogState::new(TextInputPurpose::CreateFile, "ab".to_owned());
+
+        dialog.apply_action(TextInputAction::CursorLeft);
+        dialog.apply_action(TextInputAction::Insert("X".to_owned()));
+        assert_eq!(dialog.value, "aXb");
+
+        dialog.apply_action(TextInputAction::Backspace);
+        assert_eq!(dialog.value, "ab");
+    }
+
+    #[test]
+    fn text_dialog_blocks_windows_invalid_filename_characters() {
+        let mut dialog = TextInputDialogState::new(TextInputPurpose::CreateFolder, String::new());
+        dialog.apply_action(TextInputAction::Insert("bad:name".to_owned()));
+
+        let outcome = dialog.apply_action(TextInputAction::Submit);
+
+        assert!(matches!(outcome, TextInputOutcome::Blocked(_)));
+        assert!(dialog.validation_error.is_some());
+    }
+
+    #[test]
+    fn text_dialog_submits_valid_filename() {
+        let mut dialog = TextInputDialogState::new(TextInputPurpose::Rename, "notes".to_owned());
+
+        let outcome = dialog.apply_action(TextInputAction::Submit);
+
+        assert_eq!(
+            outcome,
+            TextInputOutcome::Submitted {
+                purpose: TextInputPurpose::Rename,
+                value: "notes".to_owned()
+            }
+        );
     }
 }
