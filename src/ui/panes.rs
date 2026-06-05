@@ -1,4 +1,4 @@
-use eframe::egui;
+use eframe::egui::{self, scroll_area::ScrollBarVisibility};
 
 use crate::{
     action::CommanderAction,
@@ -64,7 +64,12 @@ fn pane(
             ui.separator();
 
             egui::ScrollArea::vertical()
+                .id_salt(match side {
+                    PaneSide::Left => "left_pane_entries",
+                    PaneSide::Right => "right_pane_entries",
+                })
                 .auto_shrink([false, false])
+                .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
                 .show(ui, |ui| {
                     for (index, entry) in pane.entries.iter().enumerate() {
                         let selected = is_active && index == pane.selected_index;
