@@ -12,6 +12,7 @@ use std::{
     time::Duration,
 };
 
+use crate::archive::{ArchiveService, LocalArchiveService};
 use crate::fs as commander_fs;
 
 pub type TaskId = u64;
@@ -393,6 +394,28 @@ impl TaskManager {
     ) -> TaskId {
         self.spawn_threaded(TaskKind::Move, label, true, move |reporter| {
             local_transfer_task(reporter, LocalTransferKind::Move, sources, target_directory)
+        })
+    }
+
+    pub fn spawn_compress_to_archive(
+        &mut self,
+        label: String,
+        sources: Vec<PathBuf>,
+        archive_path: PathBuf,
+    ) -> TaskId {
+        self.spawn_threaded(TaskKind::Compress, label, true, move |reporter| {
+            LocalArchiveService.create_archive(reporter, sources, archive_path)
+        })
+    }
+
+    pub fn spawn_decompress_archive(
+        &mut self,
+        label: String,
+        archive_path: PathBuf,
+        destination: PathBuf,
+    ) -> TaskId {
+        self.spawn_threaded(TaskKind::Decompress, label, true, move |reporter| {
+            LocalArchiveService.extract_archive(reporter, archive_path, destination)
         })
     }
 
@@ -1286,6 +1309,52 @@ mod tests {
             )
             .expect("read moved file"),
             vec![b'x'; 7]
+        );
+
+        fs::remove_dir_all(&root).expect("remove test dir");
+    }
+
+    #[test]
+    fn zip_archive_tasks_create_and_extract_nested_tree() {
+        let root = unique_test_dir();
+        let source = root.join("zip-source");
+        let archive_dir = root.join("archives");
+        let extract_parent = root.join("extract-parent");
+        fs::create_dir_all(source.join("nested")).expect("create source tree");
+        fs::create_dir_all(&archive_dir).expect("create archive dir");
+        fs::create_dir_all(&extract_parent).expect("create extract parent");
+        write_bytes(&source.join("a.bin"), 3);
+        write_bytes(&source.join("nested").join("b.bin"), 5);
+
+        let archive_path = archive_dir.join("sample.zip");
+        let mut manager = TaskManager::default();
+        let task_id = manager.spawn_compress_to_archive(
+            "Zip create test".to_owned(),
+            vec![source.clone()],
+            archive_path.clone(),
+        );
+        let completion = wait_for_completion(&mut manager, task_id);
+
+        assert_eq!(completion.status, TaskStatus::Succeeded);
+        assert!(archive_path.is_file());
+
+        let destination = extract_parent.join("sample");
+        let task_id = manager.spawn_decompress_archive(
+            "Zip extract test".to_owned(),
+            archive_path,
+            destination.clone(),
+        );
+        let completion = wait_for_completion(&mut manager, task_id);
+
+        assert_eq!(completion.status, TaskStatus::Succeeded);
+        assert_eq!(
+            fs::read(destination.join("zip-source").join("a.bin")).expect("read extracted a"),
+            vec![b'x'; 3]
+        );
+        assert_eq!(
+            fs::read(destination.join("zip-source").join("nested").join("b.bin"))
+                .expect("read extracted b"),
+            vec![b'x'; 5]
         );
 
         fs::remove_dir_all(&root).expect("remove test dir");

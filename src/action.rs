@@ -72,6 +72,7 @@ pub enum TextInputPurpose {
     Rename,
     ConnectFtp,
     ArchiveName,
+    ArchiveDestination,
     FtpProfileField,
 }
 

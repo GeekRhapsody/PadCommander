@@ -1,5 +1,6 @@
 mod action;
 mod app;
+mod archive;
 mod fs;
 mod input;
 mod platform;

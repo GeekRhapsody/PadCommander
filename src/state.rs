@@ -160,9 +160,8 @@ impl AppState {
             CommanderAction::ConnectFtp => {
                 self.begin_text_input(TextInputPurpose::ConnectFtp, String::new())
             }
-            CommanderAction::CompressToOtherPane => {
-                self.begin_text_input(TextInputPurpose::ArchiveName, String::new())
-            }
+            CommanderAction::CompressToOtherPane => self.begin_archive_name_input(),
+            CommanderAction::DecompressToOtherPane => self.begin_archive_destination_input(),
             CommanderAction::OpenFavourites => {
                 self.status = "Favourites are reserved for a future milestone.".to_owned();
             }
@@ -195,8 +194,7 @@ impl AppState {
                     self.status = "No cancellable task is active.".to_owned();
                 }
             }
-            CommanderAction::DecompressToOtherPane
-            | CommanderAction::UploadToOtherPane
+            CommanderAction::UploadToOtherPane
             | CommanderAction::DownloadToOtherPane
             | CommanderAction::CreateShortcutInOtherPane => self.set_operation_todo_status(action),
             action => self.set_todo_status(action),
@@ -496,8 +494,11 @@ impl AppState {
                 return;
             }
             TextInputPurpose::ArchiveName => {
-                self.status =
-                    "Archive creation is reserved for the compression milestone.".to_owned();
+                self.start_archive_compression(value);
+                return;
+            }
+            TextInputPurpose::ArchiveDestination => {
+                self.start_archive_decompression(value);
                 return;
             }
         };
@@ -595,6 +596,131 @@ impl AppState {
             vec![target_side]
         };
         self.transfer_task_panes.insert(task_id, refresh_sides);
+        self.status = format!("{label} in background.");
+    }
+
+    fn begin_archive_name_input(&mut self) {
+        if self.active_operation_sources().is_empty() {
+            self.status = "Compress: no available source items.".to_owned();
+            return;
+        }
+
+        let target_side = self.inactive_pane_side();
+        let target_location = self.pane(target_side).current_location.clone();
+        if target_location == fs::ROOTS_LOCATION {
+            self.status = "Compress: choose a target folder in the other pane first.".to_owned();
+            return;
+        }
+
+        self.begin_text_input(TextInputPurpose::ArchiveName, "archive.zip".to_owned());
+    }
+
+    fn begin_archive_destination_input(&mut self) {
+        let Some(archive) = self.active_pane().selected_markable_entry().cloned() else {
+            self.status = "Decompress: select an archive first.".to_owned();
+            return;
+        };
+
+        if archive.kind != FileEntryKind::Archive {
+            self.status = format!("{} is not a supported archive.", archive.display_name);
+            return;
+        }
+
+        if !archive_name_is_supported(&archive.display_name) {
+            self.status =
+                "Unsupported archive type. Supported types are .zip, .rar, and .7z.".to_owned();
+            return;
+        }
+
+        let target_side = self.inactive_pane_side();
+        let target_location = self.pane(target_side).current_location.clone();
+        if target_location == fs::ROOTS_LOCATION {
+            self.status = "Decompress: choose a target folder in the other pane first.".to_owned();
+            return;
+        }
+
+        let initial = PathBuf::from(&archive.display_name)
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().to_string())
+            .filter(|stem| !stem.is_empty())
+            .unwrap_or_else(|| "extracted".to_owned());
+        self.begin_text_input(TextInputPurpose::ArchiveDestination, initial);
+    }
+
+    fn start_archive_compression(&mut self, archive_name: String) {
+        let source_side = self.active_pane;
+        let target_side = self.inactive_pane_side();
+        let sources = self.active_operation_sources();
+        if sources.is_empty() {
+            self.status = "Compress: no available source items.".to_owned();
+            return;
+        }
+
+        let target_location = self.pane(target_side).current_location.clone();
+        if target_location == fs::ROOTS_LOCATION {
+            self.status = "Compress: choose a target folder in the other pane first.".to_owned();
+            return;
+        }
+
+        let archive_name = archive_name_with_default_extension(&archive_name);
+        if !archive_name_is_supported(&archive_name) {
+            self.status =
+                "Unsupported archive type. Supported types are .zip, .rar, and .7z.".to_owned();
+            return;
+        }
+
+        let source_paths = sources
+            .iter()
+            .map(|entry| PathBuf::from(&entry.virtual_path))
+            .collect::<Vec<_>>();
+        let archive_path = PathBuf::from(&target_location).join(&archive_name);
+        let label = format!(
+            "Compress {} item(s) to {}",
+            source_paths.len(),
+            archive_path.display()
+        );
+        let task_id =
+            self.task_manager
+                .spawn_compress_to_archive(label.clone(), source_paths, archive_path);
+        self.transfer_task_panes.insert(task_id, vec![target_side]);
+        self.status = format!("{label} in background.");
+
+        let pane = self.pane_mut(source_side);
+        pane.marked_items.clear();
+    }
+
+    fn start_archive_decompression(&mut self, destination_name: String) {
+        let target_side = self.inactive_pane_side();
+        let Some(archive) = self.active_pane().selected_markable_entry().cloned() else {
+            self.status = "Decompress: select an archive first.".to_owned();
+            return;
+        };
+
+        if archive.kind != FileEntryKind::Archive
+            || !archive_name_is_supported(&archive.display_name)
+        {
+            self.status =
+                "Unsupported archive type. Supported types are .zip, .rar, and .7z.".to_owned();
+            return;
+        }
+
+        let target_location = self.pane(target_side).current_location.clone();
+        if target_location == fs::ROOTS_LOCATION {
+            self.status = "Decompress: choose a target folder in the other pane first.".to_owned();
+            return;
+        }
+
+        let archive_path = PathBuf::from(&archive.virtual_path);
+        let destination = PathBuf::from(&target_location).join(&destination_name);
+        let label = format!(
+            "Decompress {} to {}",
+            archive.display_name,
+            destination.display()
+        );
+        let task_id =
+            self.task_manager
+                .spawn_decompress_archive(label.clone(), archive_path, destination);
+        self.transfer_task_panes.insert(task_id, vec![target_side]);
         self.status = format!("{label} in background.");
     }
 
@@ -975,6 +1101,8 @@ impl Default for CommandMenuState {
                 CommandMenuEntry::new("Create Text File", CommanderAction::CreateTextFile),
                 CommandMenuEntry::new("Copy", CommanderAction::CopyToOtherPane),
                 CommandMenuEntry::new("Move", CommanderAction::MoveToOtherPane),
+                CommandMenuEntry::new("Compress", CommanderAction::CompressToOtherPane),
+                CommandMenuEntry::new("Decompress", CommanderAction::DecompressToOtherPane),
                 CommandMenuEntry::new("Rename", CommanderAction::Rename),
                 CommandMenuEntry::new("Delete", CommanderAction::Delete),
                 CommandMenuEntry::new("Task Demo", CommanderAction::StartDemoTask),
@@ -1296,6 +1424,7 @@ impl TextInputPurpose {
             TextInputPurpose::Rename => "Rename",
             TextInputPurpose::ConnectFtp => "Connect FTP",
             TextInputPurpose::ArchiveName => "Archive Name",
+            TextInputPurpose::ArchiveDestination => "Extract To Folder",
             TextInputPurpose::FtpProfileField => "FTP Profile Field",
         }
     }
@@ -1308,6 +1437,7 @@ impl TextInputPurpose {
                 | TextInputPurpose::CreateTextFile
                 | TextInputPurpose::Rename
                 | TextInputPurpose::ArchiveName
+                | TextInputPurpose::ArchiveDestination
         )
     }
 }
@@ -1491,6 +1621,28 @@ fn validate_windows_filename(value: &str) -> Option<String> {
     }
 
     None
+}
+
+fn archive_name_with_default_extension(value: &str) -> String {
+    let trimmed = value.trim();
+    if PathBuf::from(trimmed).extension().is_some() {
+        trimmed.to_owned()
+    } else {
+        format!("{trimmed}.zip")
+    }
+}
+
+fn archive_name_is_supported(value: &str) -> bool {
+    PathBuf::from(value)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "zip" | "rar" | "7z"
+            )
+        })
+        .unwrap_or(false)
 }
 
 fn char_to_byte_index(value: &str, char_index: usize) -> usize {
