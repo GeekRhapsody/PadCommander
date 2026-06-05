@@ -26,6 +26,13 @@ pub fn show(ui: &mut egui::Ui, actions: &mut Vec<CommanderAction>) {
                 CommanderAction::DecompressToOtherPane,
             );
             command_button(ui, actions, "Settings", CommanderAction::OpenSettings);
+            command_button(ui, actions, "Task Demo", CommanderAction::StartDemoTask);
+            command_button(
+                ui,
+                actions,
+                "Cancel Task",
+                CommanderAction::CancelActiveTask,
+            );
             command_button(ui, actions, "Switch Pane", CommanderAction::SwitchPane);
 
             if ui

@@ -2,7 +2,7 @@ use crate::{
     action::{CommanderAction, FocusDirection, TextInputAction, TextInputPurpose},
     fs::{self, LocalFileSystem, VirtualFileSystem},
     settings::Settings,
-    tasks::TaskManager,
+    tasks::{TaskKind, TaskManager, TaskStatus},
 };
 
 use std::{
@@ -126,7 +126,7 @@ impl AppState {
                     self.status = "Cancelled.".to_owned();
                 } else if self.clear_active_error() {
                     self.status = "Error dismissed.".to_owned();
-                } else {
+                } else if !self.cancel_active_task() {
                     self.status = "Cancel/back is reserved for navigation history.".to_owned();
                 }
             }
@@ -184,6 +184,13 @@ impl AppState {
                 };
             }
             CommanderAction::Delete => self.begin_delete_confirmation(),
+            CommanderAction::StartDemoTask => self.start_demo_task(false),
+            CommanderAction::StartFailingDemoTask => self.start_demo_task(true),
+            CommanderAction::CancelActiveTask => {
+                if !self.cancel_active_task() {
+                    self.status = "No cancellable task is active.".to_owned();
+                }
+            }
             CommanderAction::CopyToOtherPane
             | CommanderAction::MoveToOtherPane
             | CommanderAction::DecompressToOtherPane
@@ -207,14 +214,34 @@ impl AppState {
     pub fn poll_tasks(&mut self) {
         for completion in self.task_manager.poll_completed() {
             if let Some(side) = self.delete_task_panes.remove(&completion.id) {
+                self.refresh_pane(side);
                 match completion.result {
-                    Ok(count) => {
-                        self.refresh_pane(side);
-                        self.status = format!("Moved {count} item(s) to the Recycle Bin.");
+                    Ok(data) if completion.status == TaskStatus::Succeeded => {
+                        self.status =
+                            format!("Moved {} item(s) to the Recycle Bin.", data.item_count);
                     }
                     Err(error) => {
+                        self.status = if completion.status == TaskStatus::Cancelled {
+                            format!("{} cancelled.", completion.label)
+                        } else {
+                            format!("{} failed: {error}", completion.label)
+                        };
+                    }
+                    Ok(_) => {}
+                }
+            } else {
+                match completion.status {
+                    TaskStatus::Succeeded => {
+                        self.status = format!("{} completed.", completion.label);
+                    }
+                    TaskStatus::Failed => {
+                        let error = completion.error_message().unwrap_or("unknown error");
                         self.status = format!("{} failed: {error}", completion.label);
                     }
+                    TaskStatus::Cancelled => {
+                        self.status = format!("{} cancelled.", completion.label);
+                    }
+                    TaskStatus::Queued | TaskStatus::Running => {}
                 }
             }
         }
@@ -486,6 +513,32 @@ impl AppState {
         self.delete_task_panes.insert(task_id, confirm.pane);
         self.dialog = DialogState::None;
         self.status = format!("{label} in background.");
+    }
+
+    fn start_demo_task(&mut self, failing: bool) {
+        let (kind, title, steps, fail_at_step) = if failing {
+            (
+                TaskKind::Download,
+                "Failing demo download".to_owned(),
+                20,
+                Some(12),
+            )
+        } else {
+            (TaskKind::Copy, "Demo copy task".to_owned(), 40, None)
+        };
+        let task_id = self
+            .task_manager
+            .spawn_synthetic_task(kind, title, steps, fail_at_step);
+        self.status = format!("Started task #{task_id}.");
+    }
+
+    fn cancel_active_task(&mut self) -> bool {
+        if let Some(task_id) = self.task_manager.cancel_active_task() {
+            self.status = format!("Cancellation requested for task #{task_id}.");
+            true
+        } else {
+            false
+        }
     }
 
     fn navigate_active_pane(&mut self, location: String) {
@@ -840,6 +893,9 @@ impl Default for CommandMenuState {
                 CommandMenuEntry::new("Create Text File", CommanderAction::CreateTextFile),
                 CommandMenuEntry::new("Rename", CommanderAction::Rename),
                 CommandMenuEntry::new("Delete", CommanderAction::Delete),
+                CommandMenuEntry::new("Task Demo", CommanderAction::StartDemoTask),
+                CommandMenuEntry::new("Failing Task Demo", CommanderAction::StartFailingDemoTask),
+                CommandMenuEntry::new("Cancel Task", CommanderAction::CancelActiveTask),
             ],
         }
     }

@@ -1,5 +1,6 @@
 pub mod action_bar;
 pub mod panes;
+pub mod progress;
 pub mod text_input;
 
 use eframe::egui;
@@ -22,6 +23,11 @@ pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<CommanderAction> {
         .exact_size(112.0)
         .frame(panel_frame(egui::Color32::from_rgb(28, 31, 33)))
         .show_inside(ui, |ui| action_bar::show(ui, &mut actions));
+
+    egui::Panel::bottom("task_progress")
+        .exact_size(118.0)
+        .frame(panel_frame(egui::Color32::from_rgb(25, 29, 30)))
+        .show_inside(ui, |ui| progress::show(ui, state, &mut actions));
 
     egui::CentralPanel::default()
         .frame(panel_frame(egui::Color32::from_rgb(20, 22, 23)))
@@ -205,6 +211,8 @@ fn mapping_grid(ui: &mut egui::Ui) {
             mapping_row(ui, "Mark item", "future shortcut", "X");
             mapping_row(ui, "Command menu", "future shortcut", "Y");
             mapping_row(ui, "Settings", "future shortcut", "Start / Menu");
+            mapping_row(ui, "Start task demo", "button", "Y command menu");
+            mapping_row(ui, "Cancel active task", "Esc / button", "B / command menu");
             mapping_row(ui, "Text modal focus", "Arrow keys", "D-pad");
             mapping_row(ui, "Text modal key", "Type / Enter", "A");
             mapping_row(ui, "Text modal edit", "Backspace / Esc", "X / B");
