@@ -5,7 +5,11 @@ use crate::{
     tasks::TaskManager,
 };
 
-use std::{collections::BTreeSet, time::SystemTime};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+    time::SystemTime,
+};
 
 const SCROLL_ROW_HEIGHT: f32 = 29.0;
 
@@ -15,7 +19,6 @@ pub enum PaneSide {
     Right,
 }
 
-#[derive(Clone, Debug)]
 pub struct AppState {
     pub settings: Settings,
     pub left_pane: PaneState,
@@ -26,6 +29,7 @@ pub struct AppState {
     pub show_input_help: bool,
     pub local_file_system: LocalFileSystem,
     pub task_manager: TaskManager,
+    pub delete_task_panes: BTreeMap<u64, PaneSide>,
 }
 
 impl AppState {
@@ -42,7 +46,8 @@ impl AppState {
             dialog: DialogState::None,
             show_input_help: false,
             local_file_system,
-            task_manager: TaskManager,
+            task_manager: TaskManager::default(),
+            delete_task_panes: BTreeMap::new(),
         };
 
         state.refresh_pane(PaneSide::Left);
@@ -72,9 +77,19 @@ impl AppState {
                 self.switch_active_pane();
                 self.status = format!("{} pane active.", self.active_pane_label());
             }
-            CommanderAction::MoveSelectionUp => self.move_active_selection(SelectionMovement::Up),
+            CommanderAction::MoveSelectionUp => {
+                if self.move_command_menu_focus(SelectionMovement::Up) {
+                    self.status = "Command menu focus moved.".to_owned();
+                } else {
+                    self.move_active_selection(SelectionMovement::Up);
+                }
+            }
             CommanderAction::MoveSelectionDown => {
-                self.move_active_selection(SelectionMovement::Down)
+                if self.move_command_menu_focus(SelectionMovement::Down) {
+                    self.status = "Command menu focus moved.".to_owned();
+                } else {
+                    self.move_active_selection(SelectionMovement::Down)
+                }
             }
             CommanderAction::MoveSelectionPageUp => {
                 self.move_active_selection(SelectionMovement::PageUp)
@@ -86,7 +101,13 @@ impl AppState {
                 self.move_active_selection(SelectionMovement::Home)
             }
             CommanderAction::MoveSelectionEnd => self.move_active_selection(SelectionMovement::End),
-            CommanderAction::OpenSelected => self.open_or_confirm_selected(),
+            CommanderAction::OpenSelected => {
+                if self.dialog != DialogState::None {
+                    self.confirm_dialog();
+                } else {
+                    self.open_or_confirm_selected();
+                }
+            }
             CommanderAction::GoParent => {
                 self.go_parent(self.active_pane);
             }
@@ -109,16 +130,7 @@ impl AppState {
                     self.status = "Cancel/back is reserved for navigation history.".to_owned();
                 }
             }
-            CommanderAction::Confirm => {
-                if self.text_dialog_is_open() {
-                    self.handle_text_input(TextInputAction::Submit);
-                } else if self.dialog != DialogState::None {
-                    self.dialog = DialogState::None;
-                    self.status = "Confirmed placeholder dialog.".to_owned();
-                } else {
-                    self.open_or_confirm_selected();
-                }
-            }
+            CommanderAction::Confirm => self.confirm_dialog(),
             CommanderAction::OpenSettings => {
                 self.dialog = DialogState::Message {
                     title: "Settings".to_owned(),
@@ -153,7 +165,8 @@ impl AppState {
                 self.status = "Favourites are reserved for a future milestone.".to_owned();
             }
             CommanderAction::OpenCommandPalette => {
-                self.status = "Command palette is reserved for a future milestone.".to_owned();
+                self.dialog = DialogState::CommandMenu(CommandMenuState::default());
+                self.status = "Command menu opened.".to_owned();
             }
             CommanderAction::ToggleInputHelp => {
                 self.show_input_help = !self.show_input_help;
@@ -170,9 +183,9 @@ impl AppState {
                     quit_requested: true,
                 };
             }
+            CommanderAction::Delete => self.begin_delete_confirmation(),
             CommanderAction::CopyToOtherPane
             | CommanderAction::MoveToOtherPane
-            | CommanderAction::Delete
             | CommanderAction::DecompressToOtherPane
             | CommanderAction::UploadToOtherPane
             | CommanderAction::DownloadToOtherPane
@@ -187,8 +200,24 @@ impl AppState {
         fs::scheme_name(&self.local_file_system)
     }
 
-    pub fn task_summary(&self) -> &'static str {
+    pub fn task_summary(&self) -> String {
         self.task_manager.summary()
+    }
+
+    pub fn poll_tasks(&mut self) {
+        for completion in self.task_manager.poll_completed() {
+            if let Some(side) = self.delete_task_panes.remove(&completion.id) {
+                match completion.result {
+                    Ok(count) => {
+                        self.refresh_pane(side);
+                        self.status = format!("Moved {count} item(s) to the Recycle Bin.");
+                    }
+                    Err(error) => {
+                        self.status = format!("{} failed: {error}", completion.label);
+                    }
+                }
+            }
+        }
     }
 
     pub fn active_pane(&self) -> &PaneState {
@@ -319,10 +348,8 @@ impl AppState {
                         self.status = error;
                     }
                     TextInputOutcome::Submitted { purpose, value } => {
-                        let title = purpose.title();
                         self.dialog = DialogState::None;
-                        self.status =
-                            format!("{title} value '{value}' captured for a future milestone.");
+                        self.apply_text_submission(purpose, value);
                     }
                 }
             }
@@ -354,6 +381,111 @@ impl AppState {
                     .join(", ")
             )
         };
+    }
+
+    fn confirm_dialog(&mut self) {
+        match &self.dialog {
+            DialogState::TextInput(_) => self.handle_text_input(TextInputAction::Submit),
+            DialogState::DeleteConfirm(confirm) => {
+                let confirm = confirm.clone();
+                self.start_delete_task(confirm);
+            }
+            DialogState::CommandMenu(menu) => {
+                let action = menu.selected_action();
+                self.dialog = DialogState::None;
+                self.dispatch_action(action);
+            }
+            DialogState::Message { .. } => {
+                self.dialog = DialogState::None;
+                self.status = "Confirmed placeholder dialog.".to_owned();
+            }
+            DialogState::None => self.open_or_confirm_selected(),
+        }
+    }
+
+    fn apply_text_submission(&mut self, purpose: TextInputPurpose, value: String) {
+        let side = self.active_pane;
+        let location = self.pane(side).current_location.clone();
+        let result = match purpose {
+            TextInputPurpose::CreateFolder => self
+                .local_file_system
+                .create_folder(&location, &value)
+                .map(|path| format!("Created folder {}.", path.display())),
+            TextInputPurpose::CreateFile => self
+                .local_file_system
+                .create_empty_file(&location, &value)
+                .map(|path| format!("Created file {}.", path.display())),
+            TextInputPurpose::CreateTextFile => self
+                .local_file_system
+                .create_empty_file(&location, &value)
+                .map(|path| {
+                    format!(
+                        "Created empty text file {}. TODO: add multiline initial text input.",
+                        path.display()
+                    )
+                }),
+            TextInputPurpose::Rename => {
+                let Some(source) = self
+                    .active_pane()
+                    .selected_markable_entry()
+                    .map(|entry| entry.virtual_path.clone())
+                else {
+                    self.status = "No local item selected to rename.".to_owned();
+                    return;
+                };
+                self.local_file_system
+                    .rename_entry(&source, &value)
+                    .map(|path| format!("Renamed item to {}.", path.display()))
+            }
+            TextInputPurpose::ConnectFtp | TextInputPurpose::FtpProfileField => {
+                self.status = "FTP text fields are reserved for the FTP milestone.".to_owned();
+                return;
+            }
+            TextInputPurpose::ArchiveName => {
+                self.status =
+                    "Archive creation is reserved for the compression milestone.".to_owned();
+                return;
+            }
+        };
+
+        match result {
+            Ok(message) => {
+                self.refresh_pane(side);
+                self.status = message;
+            }
+            Err(error) => {
+                self.status = error.user_message();
+            }
+        }
+    }
+
+    fn begin_delete_confirmation(&mut self) {
+        let items = self.active_operation_sources();
+        if items.is_empty() {
+            self.status = "Delete: no available source items.".to_owned();
+            return;
+        }
+
+        self.dialog = DialogState::DeleteConfirm(DeleteConfirmationState {
+            pane: self.active_pane,
+            items,
+        });
+        self.status = "Delete confirmation opened.".to_owned();
+    }
+
+    fn start_delete_task(&mut self, confirm: DeleteConfirmationState) {
+        let paths: Vec<PathBuf> = confirm
+            .items
+            .iter()
+            .map(|entry| PathBuf::from(&entry.virtual_path))
+            .collect();
+        let label = format!("Deleting {} item(s)", paths.len());
+        let task_id = self
+            .task_manager
+            .spawn_delete_to_recycle_bin(label.clone(), paths);
+        self.delete_task_panes.insert(task_id, confirm.pane);
+        self.dialog = DialogState::None;
+        self.status = format!("{label} in background.");
     }
 
     fn navigate_active_pane(&mut self, location: String) {
@@ -407,6 +539,15 @@ impl AppState {
         }
     }
 
+    fn move_command_menu_focus(&mut self, movement: SelectionMovement) -> bool {
+        let DialogState::CommandMenu(menu) = &mut self.dialog else {
+            return false;
+        };
+
+        menu.move_focus(movement);
+        true
+    }
+
     pub fn active_operation_sources(&self) -> Vec<FileEntry> {
         self.active_pane().operation_sources()
     }
@@ -418,7 +559,10 @@ impl AppState {
     fn text_dialog_mut(&mut self) -> Option<&mut TextInputDialogState> {
         match &mut self.dialog {
             DialogState::TextInput(dialog) => Some(dialog),
-            DialogState::None | DialogState::Message { .. } => None,
+            DialogState::None
+            | DialogState::Message { .. }
+            | DialogState::DeleteConfirm(_)
+            | DialogState::CommandMenu(_) => None,
         }
     }
 }
@@ -562,7 +706,7 @@ pub enum SelectionMovement {
     End,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FileEntry {
     pub display_name: String,
     pub virtual_path: String,
@@ -676,6 +820,90 @@ pub enum DialogState {
     None,
     Message { title: String, message: String },
     TextInput(TextInputDialogState),
+    DeleteConfirm(DeleteConfirmationState),
+    CommandMenu(CommandMenuState),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CommandMenuState {
+    pub focused_index: usize,
+    pub entries: Vec<CommandMenuEntry>,
+}
+
+impl Default for CommandMenuState {
+    fn default() -> Self {
+        Self {
+            focused_index: 0,
+            entries: vec![
+                CommandMenuEntry::new("Create Folder", CommanderAction::CreateFolder),
+                CommandMenuEntry::new("Create File", CommanderAction::CreateFile),
+                CommandMenuEntry::new("Create Text File", CommanderAction::CreateTextFile),
+                CommandMenuEntry::new("Rename", CommanderAction::Rename),
+                CommandMenuEntry::new("Delete", CommanderAction::Delete),
+            ],
+        }
+    }
+}
+
+impl CommandMenuState {
+    pub fn move_focus(&mut self, movement: SelectionMovement) {
+        if self.entries.is_empty() {
+            self.focused_index = 0;
+            return;
+        }
+
+        let last_index = self.entries.len() - 1;
+        self.focused_index = match movement {
+            SelectionMovement::Up | SelectionMovement::PageUp => {
+                self.focused_index.saturating_sub(1)
+            }
+            SelectionMovement::Down | SelectionMovement::PageDown => {
+                (self.focused_index + 1).min(last_index)
+            }
+            SelectionMovement::Home => 0,
+            SelectionMovement::End => last_index,
+        };
+    }
+
+    pub fn selected_action(&self) -> CommanderAction {
+        self.entries
+            .get(self.focused_index)
+            .map(|entry| entry.action.clone())
+            .unwrap_or(CommanderAction::Cancel)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CommandMenuEntry {
+    pub label: &'static str,
+    pub action: CommanderAction,
+}
+
+impl CommandMenuEntry {
+    fn new(label: &'static str, action: CommanderAction) -> Self {
+        Self { label, action }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeleteConfirmationState {
+    pub pane: PaneSide,
+    pub items: Vec<FileEntry>,
+}
+
+impl DeleteConfirmationState {
+    pub fn item_count(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn examples(&self) -> String {
+        self.items
+            .iter()
+            .take(5)
+            .map(|entry| entry.display_name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1180,7 +1408,8 @@ mod tests {
             dialog: DialogState::None,
             show_input_help: false,
             local_file_system: LocalFileSystem,
-            task_manager: TaskManager,
+            task_manager: TaskManager::default(),
+            delete_task_panes: BTreeMap::new(),
         }
     }
 

@@ -34,6 +34,7 @@ impl eframe::App for HandheldCommanderApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         apply_ui_scale(&ctx, self.state.settings.ui_scale);
+        self.state.poll_tasks();
 
         let mut actions = self
             .input_manager

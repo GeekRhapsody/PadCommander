@@ -19,7 +19,7 @@ pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<CommanderAction> {
         .show_inside(ui, |ui| header(ui, state));
 
     egui::Panel::bottom("command_bar")
-        .exact_size(72.0)
+        .exact_size(112.0)
         .frame(panel_frame(egui::Color32::from_rgb(28, 31, 33)))
         .show_inside(ui, |ui| action_bar::show(ui, &mut actions));
 
@@ -29,7 +29,7 @@ pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<CommanderAction> {
 
     input_help_overlay(ui.ctx(), state);
     text_input::show(ui.ctx(), state, &mut actions);
-    modal_overlay(ui.ctx(), state);
+    modal_overlay(ui.ctx(), state, &mut actions);
 
     actions
 }
@@ -61,9 +61,11 @@ fn header(ui: &mut egui::Ui, state: &AppState) {
     });
 }
 
-fn modal_overlay(ctx: &egui::Context, state: &AppState) {
-    let (title, message) = match &state.dialog {
-        DialogState::Message { title, message } => (title.as_str(), message.as_str()),
+fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<CommanderAction>) {
+    let dialog = match &state.dialog {
+        DialogState::Message { .. }
+        | DialogState::DeleteConfirm(_)
+        | DialogState::CommandMenu(_) => &state.dialog,
         DialogState::None | DialogState::TextInput(_) => return,
     };
 
@@ -91,8 +93,49 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState) {
                 .inner_margin(egui::Margin::same(16))
                 .show(ui, |ui| {
                     ui.set_min_width(360.0);
-                    ui.heading(title);
-                    ui.label(message);
+                    match dialog {
+                        DialogState::Message { title, message } => {
+                            ui.heading(title);
+                            ui.label(message);
+                        }
+                        DialogState::DeleteConfirm(confirm) => {
+                            ui.heading("Delete to Recycle Bin");
+                            ui.label(format!(
+                                "Move {} item(s) to the Recycle Bin?",
+                                confirm.item_count()
+                            ));
+                            ui.label(format!("Examples: {}", confirm.examples()));
+                            ui.add_space(10.0);
+                            ui.horizontal(|ui| {
+                                if ui.button("Delete").clicked() {
+                                    actions.push(CommanderAction::Confirm);
+                                }
+                                if ui.button("Cancel").clicked() {
+                                    actions.push(CommanderAction::Cancel);
+                                }
+                                ui.label("A / Enter confirms. B / Esc cancels.");
+                            });
+                        }
+                        DialogState::CommandMenu(menu) => {
+                            ui.heading("Command Menu");
+                            ui.add_space(8.0);
+                            for (index, entry) in menu.entries.iter().enumerate() {
+                                let focused = index == menu.focused_index;
+                                let mut button = egui::Button::new(entry.label);
+                                if focused {
+                                    button = button
+                                        .fill(egui::Color32::from_rgb(73, 104, 94))
+                                        .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE));
+                                }
+                                if ui.add_sized([260.0, 34.0], button).clicked() {
+                                    actions.push(entry.action.clone());
+                                }
+                            }
+                            ui.add_space(8.0);
+                            ui.label("D-pad/arrow keys move. A / Enter selects. B / Esc cancels.");
+                        }
+                        DialogState::None | DialogState::TextInput(_) => {}
+                    }
                 });
         });
 }
@@ -154,11 +197,13 @@ fn mapping_grid(ui: &mut egui::Ui) {
             mapping_row(ui, "Copy", "F5", "future command menu");
             mapping_row(ui, "Move", "F6", "future command menu");
             mapping_row(ui, "Create folder", "F7", "future command menu");
+            mapping_row(ui, "Create file", "Ctrl+N", "Y command menu");
+            mapping_row(ui, "Create text file", "Ctrl+T", "Y command menu");
             mapping_row(ui, "Delete", "F8 / Delete", "future command menu");
             mapping_row(ui, "Rename", "F2", "future command menu");
             mapping_row(ui, "Refresh", "Ctrl+R", "future command menu");
             mapping_row(ui, "Mark item", "future shortcut", "X");
-            mapping_row(ui, "Favourites", "future shortcut", "Y");
+            mapping_row(ui, "Command menu", "future shortcut", "Y");
             mapping_row(ui, "Settings", "future shortcut", "Start / Menu");
             mapping_row(ui, "Text modal focus", "Arrow keys", "D-pad");
             mapping_row(ui, "Text modal key", "Type / Enter", "A");

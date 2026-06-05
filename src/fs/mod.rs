@@ -5,7 +5,9 @@ use crate::{
 
 use chrono::{DateTime, Local};
 use std::{
-    env, fs, io,
+    env, fs,
+    fs::OpenOptions,
+    io,
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -36,6 +38,56 @@ impl VirtualFileSystem for LocalFileSystem {
         }
 
         list_directory(Path::new(location))
+    }
+}
+
+impl LocalFileSystem {
+    pub fn create_folder(&self, parent_location: &str, name: &str) -> Result<PathBuf, VfsError> {
+        let target = child_path(parent_location, name)?;
+        fs::create_dir(&target).map_err(|source| VfsError::CreateDirectory {
+            path: path_to_location(&target),
+            source,
+        })?;
+        Ok(target)
+    }
+
+    pub fn create_empty_file(
+        &self,
+        parent_location: &str,
+        name: &str,
+    ) -> Result<PathBuf, VfsError> {
+        let target = child_path(parent_location, name)?;
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+            .map_err(|source| VfsError::CreateFile {
+                path: path_to_location(&target),
+                source,
+            })?;
+        Ok(target)
+    }
+
+    pub fn rename_entry(&self, source_location: &str, new_name: &str) -> Result<PathBuf, VfsError> {
+        let source_path = Path::new(source_location);
+        let parent = source_path
+            .parent()
+            .ok_or_else(|| VfsError::InvalidOperation {
+                message: format!("Cannot rename {}.", location_label(source_location)),
+            })?;
+        let target = parent.join(new_name);
+        if target.exists() {
+            return Err(VfsError::Conflict {
+                path: path_to_location(&target),
+            });
+        }
+
+        fs::rename(source_path, &target).map_err(|source| VfsError::Rename {
+            from: source_location.to_owned(),
+            to: path_to_location(&target),
+            source,
+        })?;
+        Ok(target)
     }
 }
 
@@ -231,10 +283,48 @@ fn path_to_location(path: &Path) -> String {
     path.to_string_lossy().to_string()
 }
 
+fn child_path(parent_location: &str, name: &str) -> Result<PathBuf, VfsError> {
+    if parent_location == ROOTS_LOCATION {
+        return Err(VfsError::InvalidOperation {
+            message: "Choose a drive or folder before creating items.".to_owned(),
+        });
+    }
+
+    Ok(Path::new(parent_location).join(name))
+}
+
 #[derive(Debug)]
 pub enum VfsError {
-    ReadDirectory { location: String, source: io::Error },
-    ReadDirectoryEntry { location: String, source: io::Error },
+    ReadDirectory {
+        location: String,
+        source: io::Error,
+    },
+    ReadDirectoryEntry {
+        location: String,
+        source: io::Error,
+    },
+    CreateDirectory {
+        path: String,
+        source: io::Error,
+    },
+    CreateFile {
+        path: String,
+        source: io::Error,
+    },
+    Rename {
+        from: String,
+        to: String,
+        source: io::Error,
+    },
+    Conflict {
+        path: String,
+    },
+    InvalidOperation {
+        message: String,
+    },
+    Delete {
+        message: String,
+    },
 }
 
 impl VfsError {
@@ -244,8 +334,35 @@ impl VfsError {
             | VfsError::ReadDirectoryEntry { location, source } => {
                 format!("Cannot read {}: {source}", location_label(location))
             }
+            VfsError::CreateDirectory { path, source } => {
+                format!("Cannot create folder {}: {source}", location_label(path))
+            }
+            VfsError::CreateFile { path, source } => {
+                format!("Cannot create file {}: {source}", location_label(path))
+            }
+            VfsError::Rename { from, to, source } => {
+                format!(
+                    "Cannot rename {} to {}: {source}",
+                    location_label(from),
+                    location_label(to)
+                )
+            }
+            VfsError::Conflict { path } => format!("{} already exists.", location_label(path)),
+            VfsError::InvalidOperation { message } | VfsError::Delete { message } => {
+                message.clone()
+            }
         }
     }
+}
+
+pub fn delete_paths_to_recycle_bin(paths: &[PathBuf]) -> Result<(), VfsError> {
+    if paths.is_empty() {
+        return Err(VfsError::InvalidOperation {
+            message: "No items selected for deletion.".to_owned(),
+        });
+    }
+
+    windows::delete_to_recycle_bin(paths).map_err(|message| VfsError::Delete { message })
 }
 
 pub fn modified_label(modified: Option<SystemTime>) -> String {

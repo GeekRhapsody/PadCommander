@@ -174,6 +174,14 @@ impl KeyboardInputManager {
                 actions.push(CommanderAction::Refresh);
             }
 
+            if input.modifiers.ctrl && input.key_pressed(egui::Key::N) {
+                actions.push(CommanderAction::CreateFile);
+            }
+
+            if input.modifiers.ctrl && input.key_pressed(egui::Key::T) {
+                actions.push(CommanderAction::CreateTextFile);
+            }
+
             if input.modifiers.ctrl && input.key_pressed(egui::Key::Q) {
                 actions.push(CommanderAction::QuitDevelopment);
             }
@@ -333,7 +341,7 @@ fn action_for_button(button: Button, text_input_active: bool) -> Option<Commande
         Button::South => Some(CommanderAction::OpenSelected),
         Button::East => Some(CommanderAction::Cancel),
         Button::West => Some(CommanderAction::ToggleMarkSelected),
-        Button::North => Some(CommanderAction::OpenFavourites),
+        Button::North => Some(CommanderAction::OpenCommandPalette),
         Button::Start => Some(CommanderAction::OpenSettings),
         Button::Select => Some(CommanderAction::ToggleInputHelp),
         _ => None,
