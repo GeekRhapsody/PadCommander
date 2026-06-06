@@ -26,10 +26,16 @@ impl InputManager {
         &mut self,
         ctx: &egui::Context,
         text_input_active: bool,
+        settings_active: bool,
     ) -> Vec<CommanderAction> {
         let now = Instant::now();
-        let mut actions = self.keyboard.collect_actions(ctx, now, text_input_active);
-        actions.extend(self.gamepad.poll_actions(now, text_input_active));
+        let mut actions =
+            self.keyboard
+                .collect_actions(ctx, now, text_input_active, settings_active);
+        actions.extend(
+            self.gamepad
+                .poll_actions(now, text_input_active, settings_active),
+        );
         actions
     }
 }
@@ -46,6 +52,7 @@ impl KeyboardInputManager {
         ctx: &egui::Context,
         now: Instant,
         text_input_active: bool,
+        settings_active: bool,
     ) -> Vec<CommanderAction> {
         ctx.input(|input| {
             let mut actions = Vec::new();
@@ -134,6 +141,14 @@ impl KeyboardInputManager {
                 actions.push(CommanderAction::OpenSelected);
             }
 
+            if settings_active && input.key_pressed(egui::Key::ArrowLeft) {
+                actions.push(CommanderAction::DecreaseUiScale);
+            }
+
+            if settings_active && input.key_pressed(egui::Key::ArrowRight) {
+                actions.push(CommanderAction::IncreaseUiScale);
+            }
+
             if input.key_pressed(egui::Key::Escape) {
                 actions.push(CommanderAction::Cancel);
             }
@@ -148,6 +163,12 @@ impl KeyboardInputManager {
 
             if input.key_pressed(egui::Key::F1) {
                 actions.push(CommanderAction::ToggleInputHelp);
+            }
+
+            if input.key_pressed(egui::Key::F3)
+                || (input.modifiers.ctrl && input.key_pressed(egui::Key::F))
+            {
+                actions.push(CommanderAction::OpenFavourites);
             }
 
             if input.key_pressed(egui::Key::F2) {
@@ -220,7 +241,12 @@ impl GamepadInputManager {
         }
     }
 
-    pub fn poll_actions(&mut self, now: Instant, text_input_active: bool) -> Vec<CommanderAction> {
+    pub fn poll_actions(
+        &mut self,
+        now: Instant,
+        text_input_active: bool,
+        settings_active: bool,
+    ) -> Vec<CommanderAction> {
         let mut actions = Vec::new();
 
         let events = if let Some(gilrs) = &mut self.gilrs {
@@ -240,7 +266,7 @@ impl GamepadInputManager {
             match event.event {
                 EventType::ButtonPressed(button, _) => {
                     self.set_dpad_hold(button, true);
-                    let repeated_dpad = if text_input_active {
+                    let repeated_dpad = if text_input_active || settings_active {
                         matches!(
                             button,
                             Button::DPadUp
@@ -253,7 +279,11 @@ impl GamepadInputManager {
                     };
 
                     if !repeated_dpad {
-                        actions.extend(action_for_button(button, text_input_active));
+                        actions.extend(action_for_button(
+                            button,
+                            text_input_active,
+                            settings_active,
+                        ));
                     }
                 }
                 EventType::ButtonReleased(button, _) => {
@@ -295,6 +325,27 @@ impl GamepadInputManager {
                 now,
                 CommanderAction::TextInput(TextInputAction::MoveKeyFocus(FocusDirection::Right)),
             ));
+        } else if settings_active {
+            actions.extend(self.dpad_left.update(
+                self.dpad_left_held,
+                now,
+                CommanderAction::DecreaseUiScale,
+            ));
+            actions.extend(self.dpad_right.update(
+                self.dpad_right_held,
+                now,
+                CommanderAction::IncreaseUiScale,
+            ));
+            actions.extend(self.dpad_up.update(
+                self.dpad_up_held,
+                now,
+                CommanderAction::MoveSelectionUp,
+            ));
+            actions.extend(self.dpad_down.update(
+                self.dpad_down_held,
+                now,
+                CommanderAction::MoveSelectionDown,
+            ));
         } else {
             actions.extend(self.dpad_up.update(
                 self.dpad_up_held,
@@ -322,7 +373,11 @@ impl GamepadInputManager {
     }
 }
 
-fn action_for_button(button: Button, text_input_active: bool) -> Option<CommanderAction> {
+fn action_for_button(
+    button: Button,
+    text_input_active: bool,
+    settings_active: bool,
+) -> Option<CommanderAction> {
     if text_input_active {
         return match button {
             Button::South => Some(CommanderAction::TextInput(TextInputAction::PressFocusedKey)),
@@ -330,6 +385,16 @@ fn action_for_button(button: Button, text_input_active: bool) -> Option<Commande
             Button::West => Some(CommanderAction::TextInput(TextInputAction::Backspace)),
             Button::North => Some(CommanderAction::TextInput(TextInputAction::ToggleSymbols)),
             Button::Start => Some(CommanderAction::TextInput(TextInputAction::Submit)),
+            _ => None,
+        };
+    }
+
+    if settings_active {
+        return match button {
+            Button::DPadLeft => Some(CommanderAction::DecreaseUiScale),
+            Button::DPadRight => Some(CommanderAction::IncreaseUiScale),
+            Button::South | Button::Start => Some(CommanderAction::Confirm),
+            Button::East => Some(CommanderAction::Cancel),
             _ => None,
         };
     }
@@ -344,6 +409,7 @@ fn action_for_button(button: Button, text_input_active: bool) -> Option<Commande
         Button::North => Some(CommanderAction::OpenCommandPalette),
         Button::Start => Some(CommanderAction::OpenSettings),
         Button::Select => Some(CommanderAction::ToggleInputHelp),
+        Button::LeftThumb => Some(CommanderAction::OpenFavourites),
         _ => None,
     }
 }

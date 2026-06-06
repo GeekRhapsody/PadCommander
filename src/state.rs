@@ -1,7 +1,7 @@
 use crate::{
     action::{CommanderAction, FocusDirection, TextInputAction, TextInputPurpose},
     fs::{self, LocalFileSystem, VirtualFileSystem},
-    settings::Settings,
+    settings::{self, Settings, UI_SCALE_STEP},
     tasks::{TaskId, TaskKind, TaskManager, TaskStatus},
 };
 
@@ -21,6 +21,7 @@ pub enum PaneSide {
 
 pub struct AppState {
     pub settings: Settings,
+    pub settings_path: PathBuf,
     pub left_pane: PaneState,
     pub right_pane: PaneState,
     pub active_pane: PaneSide,
@@ -37,10 +38,23 @@ impl AppState {
     pub fn new() -> Self {
         let local_file_system = LocalFileSystem;
         let initial_location = local_file_system.initial_location();
+        let settings_path = settings::config_file_path();
+        let mut settings = settings::load().unwrap_or_default().sanitize();
+        let left_location = settings
+            .last_left_pane_location
+            .clone()
+            .unwrap_or_else(|| initial_location.clone());
+        let right_location = settings
+            .last_right_pane_location
+            .clone()
+            .unwrap_or_else(|| initial_location.clone());
+        settings.last_left_pane_location = Some(left_location.clone());
+        settings.last_right_pane_location = Some(right_location.clone());
         let mut state = Self {
-            settings: Settings::default(),
-            left_pane: PaneState::new("Left Pane", initial_location.clone()),
-            right_pane: PaneState::new("Right Pane", initial_location),
+            settings,
+            settings_path,
+            left_pane: PaneState::new("Left Pane", left_location),
+            right_pane: PaneState::new("Right Pane", right_location),
             active_pane: PaneSide::Left,
             status: "Ready. F1 or View opens input help. Ctrl+Q quits during development."
                 .to_owned(),
@@ -116,7 +130,13 @@ impl AppState {
             CommanderAction::Refresh => {
                 self.refresh_pane(self.active_pane);
             }
-            CommanderAction::ToggleMarkSelected => self.toggle_mark_selected(),
+            CommanderAction::ToggleMarkSelected => {
+                if matches!(self.dialog, DialogState::Favourites(_)) {
+                    self.remove_focused_favourite();
+                } else {
+                    self.toggle_mark_selected();
+                }
+            }
             CommanderAction::Cancel => {
                 if self.show_input_help {
                     self.show_input_help = false;
@@ -134,11 +154,8 @@ impl AppState {
             }
             CommanderAction::Confirm => self.confirm_dialog(),
             CommanderAction::OpenSettings => {
-                self.dialog = DialogState::Message {
-                    title: "Settings".to_owned(),
-                    message: "Settings are reserved for a future milestone.".to_owned(),
-                };
-                self.status = "Settings are reserved for a future milestone.".to_owned();
+                self.dialog = DialogState::Settings(SettingsModalState::default());
+                self.status = "Settings opened.".to_owned();
             }
             CommanderAction::CreateFolder => {
                 self.begin_text_input(TextInputPurpose::CreateFolder, String::new())
@@ -163,11 +180,30 @@ impl AppState {
             CommanderAction::CompressToOtherPane => self.begin_archive_name_input(),
             CommanderAction::DecompressToOtherPane => self.begin_archive_destination_input(),
             CommanderAction::OpenFavourites => {
-                self.status = "Favourites are reserved for a future milestone.".to_owned();
+                self.dialog = DialogState::Favourites(FavouritesModalState::default());
+                self.status = "Favourites opened.".to_owned();
+            }
+            CommanderAction::AddFavourite => self.add_active_location_to_favourites(),
+            CommanderAction::RemoveFavourite => self.remove_focused_favourite(),
+            CommanderAction::OpenFocusedFavourite => self.open_focused_favourite(),
+            CommanderAction::FocusFavourite(index) => self.focus_favourite(index),
+            CommanderAction::IncreaseUiScale => {
+                if matches!(self.dialog, DialogState::Settings(_)) {
+                    self.adjust_ui_scale(UI_SCALE_STEP);
+                }
+            }
+            CommanderAction::DecreaseUiScale => {
+                if matches!(self.dialog, DialogState::Settings(_)) {
+                    self.adjust_ui_scale(-UI_SCALE_STEP);
+                }
             }
             CommanderAction::OpenCommandPalette => {
-                self.dialog = DialogState::CommandMenu(CommandMenuState::default());
-                self.status = "Command menu opened.".to_owned();
+                if matches!(self.dialog, DialogState::Favourites(_)) {
+                    self.add_active_location_to_favourites();
+                } else {
+                    self.dialog = DialogState::CommandMenu(CommandMenuState::default());
+                    self.status = "Command menu opened.".to_owned();
+                }
             }
             CommanderAction::ToggleInputHelp => {
                 self.show_input_help = !self.show_input_help;
@@ -197,7 +233,6 @@ impl AppState {
             CommanderAction::UploadToOtherPane
             | CommanderAction::DownloadToOtherPane
             | CommanderAction::CreateShortcutInOtherPane => self.set_operation_todo_status(action),
-            action => self.set_todo_status(action),
         }
 
         DispatchResult::default()
@@ -414,10 +449,6 @@ impl AppState {
         self.status = format!("{title} text input opened.");
     }
 
-    fn set_todo_status(&mut self, action: CommanderAction) {
-        self.status = format!("{action:?} is reserved for a future milestone.");
-    }
-
     fn set_operation_todo_status(&mut self, action: CommanderAction) {
         let sources = self.active_operation_sources();
         self.status = if sources.is_empty() {
@@ -447,6 +478,11 @@ impl AppState {
                 self.dialog = DialogState::None;
                 self.dispatch_action(action);
             }
+            DialogState::Settings(_) => {
+                self.dialog = DialogState::None;
+                self.status = "Settings applied.".to_owned();
+            }
+            DialogState::Favourites(_) => self.open_focused_favourite(),
             DialogState::Message { .. } => {
                 self.dialog = DialogState::None;
                 self.status = "Confirmed placeholder dialog.".to_owned();
@@ -753,12 +789,14 @@ impl AppState {
     fn navigate_active_pane(&mut self, location: String) {
         let active_pane = self.active_pane;
         self.pane_mut(active_pane).current_location = location;
+        self.remember_pane_location(active_pane);
         self.refresh_pane(active_pane);
     }
 
     fn go_parent(&mut self, side: PaneSide) {
         let parent = fs::parent_location(&self.pane(side).current_location);
         self.pane_mut(side).current_location = parent;
+        self.remember_pane_location(side);
         self.refresh_pane(side);
     }
 
@@ -802,12 +840,144 @@ impl AppState {
     }
 
     fn move_command_menu_focus(&mut self, movement: SelectionMovement) -> bool {
-        let DialogState::CommandMenu(menu) = &mut self.dialog else {
-            return false;
+        match &mut self.dialog {
+            DialogState::CommandMenu(menu) => {
+                menu.move_focus(movement);
+                true
+            }
+            DialogState::Settings(settings) => {
+                settings.move_focus(movement);
+                true
+            }
+            DialogState::Favourites(favourites) => {
+                favourites.move_focus(movement, self.settings.favourites.len());
+                true
+            }
+            DialogState::None
+            | DialogState::Message { .. }
+            | DialogState::TextInput(_)
+            | DialogState::DeleteConfirm(_) => false,
+        }
+    }
+
+    fn adjust_ui_scale(&mut self, delta: f32) {
+        self.settings.ui_scale = settings::clamp_ui_scale(self.settings.ui_scale + delta);
+        self.persist_settings("UI scale updated.");
+    }
+
+    fn add_active_location_to_favourites(&mut self) {
+        let location = self.active_pane().current_location.clone();
+        if location == fs::ROOTS_LOCATION {
+            self.status = "Choose a folder before adding a favourite.".to_owned();
+            return;
+        }
+
+        if !self.settings.favourites.contains(&location) {
+            self.settings.favourites.push(location.clone());
+            self.settings.favourites.sort();
+        }
+
+        if let DialogState::Favourites(favourites) = &mut self.dialog {
+            favourites.focused_index = self
+                .settings
+                .favourites
+                .iter()
+                .position(|favourite| favourite == &location)
+                .unwrap_or(0);
+        }
+
+        self.persist_settings("Favourite saved.");
+    }
+
+    fn remove_focused_favourite(&mut self) {
+        let Some(index) = self.focused_favourite_index() else {
+            self.status = "No favourite selected.".to_owned();
+            return;
         };
 
-        menu.move_focus(movement);
-        true
+        let removed = self.settings.favourites.remove(index);
+        if let DialogState::Favourites(favourites) = &mut self.dialog {
+            favourites.clamp_focus(self.settings.favourites.len());
+        }
+        self.persist_settings(&format!(
+            "Removed favourite {}.",
+            fs::location_label(&removed)
+        ));
+    }
+
+    fn open_focused_favourite(&mut self) {
+        let Some(index) = self.focused_favourite_index() else {
+            self.status = "No favourite selected.".to_owned();
+            return;
+        };
+        let location = self.settings.favourites[index].clone();
+
+        match self.local_file_system.list_location(&location) {
+            Ok(_) => {
+                self.dialog = DialogState::None;
+                let active_pane = self.active_pane;
+                self.pane_mut(active_pane).current_location = location.clone();
+                self.remember_pane_location(active_pane);
+                self.refresh_pane(active_pane);
+                self.status = format!("Opened favourite {}.", fs::location_label(&location));
+            }
+            Err(error) => {
+                self.status = format!(
+                    "Cannot open favourite {}: {}",
+                    fs::location_label(&location),
+                    error.user_message()
+                );
+            }
+        }
+    }
+
+    fn focused_favourite_index(&self) -> Option<usize> {
+        let DialogState::Favourites(favourites) = &self.dialog else {
+            return None;
+        };
+
+        if self.settings.favourites.is_empty() {
+            None
+        } else {
+            Some(
+                favourites
+                    .focused_index
+                    .min(self.settings.favourites.len() - 1),
+            )
+        }
+    }
+
+    fn focus_favourite(&mut self, index: usize) {
+        let DialogState::Favourites(favourites) = &mut self.dialog else {
+            return;
+        };
+
+        if self.settings.favourites.is_empty() {
+            favourites.focused_index = 0;
+        } else {
+            favourites.focused_index = index.min(self.settings.favourites.len() - 1);
+        }
+    }
+
+    fn remember_pane_location(&mut self, side: PaneSide) {
+        let location = self.pane(side).current_location.clone();
+        match side {
+            PaneSide::Left => self.settings.last_left_pane_location = Some(location),
+            PaneSide::Right => self.settings.last_right_pane_location = Some(location),
+        }
+        self.persist_settings("Pane location saved.");
+    }
+
+    fn persist_settings(&mut self, success_status: &str) {
+        match settings::save_to_path(&self.settings, &self.settings_path) {
+            Ok(()) => self.status = success_status.to_owned(),
+            Err(error) => {
+                self.status = format!(
+                    "Could not save settings to {}: {error}",
+                    self.settings_path.display()
+                );
+            }
+        }
     }
 
     pub fn active_operation_sources(&self) -> Vec<FileEntry> {
@@ -818,13 +988,19 @@ impl AppState {
         matches!(self.dialog, DialogState::TextInput(_))
     }
 
+    pub fn settings_dialog_is_open(&self) -> bool {
+        matches!(self.dialog, DialogState::Settings(_))
+    }
+
     fn text_dialog_mut(&mut self) -> Option<&mut TextInputDialogState> {
         match &mut self.dialog {
             DialogState::TextInput(dialog) => Some(dialog),
             DialogState::None
             | DialogState::Message { .. }
             | DialogState::DeleteConfirm(_)
-            | DialogState::CommandMenu(_) => None,
+            | DialogState::CommandMenu(_)
+            | DialogState::Settings(_)
+            | DialogState::Favourites(_) => None,
         }
     }
 }
@@ -1084,6 +1260,60 @@ pub enum DialogState {
     TextInput(TextInputDialogState),
     DeleteConfirm(DeleteConfirmationState),
     CommandMenu(CommandMenuState),
+    Settings(SettingsModalState),
+    Favourites(FavouritesModalState),
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct SettingsModalState {
+    pub focused_index: usize,
+}
+
+impl SettingsModalState {
+    pub fn move_focus(&mut self, movement: SelectionMovement) {
+        self.focused_index = match movement {
+            SelectionMovement::Up
+            | SelectionMovement::PageUp
+            | SelectionMovement::Home
+            | SelectionMovement::Down
+            | SelectionMovement::PageDown
+            | SelectionMovement::End => 0,
+        };
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct FavouritesModalState {
+    pub focused_index: usize,
+}
+
+impl FavouritesModalState {
+    pub fn move_focus(&mut self, movement: SelectionMovement, favourite_count: usize) {
+        if favourite_count == 0 {
+            self.focused_index = 0;
+            return;
+        }
+
+        let last_index = favourite_count - 1;
+        self.focused_index = match movement {
+            SelectionMovement::Up | SelectionMovement::PageUp => {
+                self.focused_index.saturating_sub(1)
+            }
+            SelectionMovement::Down | SelectionMovement::PageDown => {
+                (self.focused_index + 1).min(last_index)
+            }
+            SelectionMovement::Home => 0,
+            SelectionMovement::End => last_index,
+        };
+    }
+
+    pub fn clamp_focus(&mut self, favourite_count: usize) {
+        if favourite_count == 0 {
+            self.focused_index = 0;
+        } else {
+            self.focused_index = self.focused_index.min(favourite_count - 1);
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1677,6 +1907,7 @@ mod tests {
     fn test_state() -> AppState {
         AppState {
             settings: Settings::default(),
+            settings_path: std::env::temp_dir().join("handheld_commander_test_settings.json"),
             left_pane: PaneState {
                 title: "Left".to_owned(),
                 current_location: fs::ROOTS_LOCATION.to_owned(),

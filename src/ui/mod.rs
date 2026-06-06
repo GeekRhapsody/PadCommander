@@ -8,6 +8,7 @@ use eframe::egui;
 use crate::{
     action::CommanderAction,
     app::APP_TITLE,
+    settings,
     state::{AppState, DialogState},
 };
 
@@ -71,7 +72,9 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
     let dialog = match &state.dialog {
         DialogState::Message { .. }
         | DialogState::DeleteConfirm(_)
-        | DialogState::CommandMenu(_) => &state.dialog,
+        | DialogState::CommandMenu(_)
+        | DialogState::Settings(_)
+        | DialogState::Favourites(_) => &state.dialog,
         DialogState::None | DialogState::TextInput(_) => return,
     };
 
@@ -139,6 +142,82 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                             }
                             ui.add_space(8.0);
                             ui.label("D-pad/arrow keys move. A / Enter selects. B / Esc cancels.");
+                        }
+                        DialogState::Settings(_) => {
+                            ui.heading("Settings");
+                            ui.add_space(8.0);
+                            ui.horizontal(|ui| {
+                                ui.strong("UI scale");
+                                ui.add_space(18.0);
+                                if ui.button("-").clicked() {
+                                    actions.push(CommanderAction::DecreaseUiScale);
+                                }
+                                ui.label(format!("{:.1}", state.settings.ui_scale));
+                                if ui.button("+").clicked() {
+                                    actions.push(CommanderAction::IncreaseUiScale);
+                                }
+                            });
+                            ui.add(
+                                egui::ProgressBar::new(
+                                    (state.settings.ui_scale - settings::MIN_UI_SCALE)
+                                        / (settings::MAX_UI_SCALE - settings::MIN_UI_SCALE),
+                                )
+                                .desired_width(260.0),
+                            );
+                            ui.add_space(10.0);
+                            ui.horizontal(|ui| {
+                                if ui.button("Apply").clicked() {
+                                    actions.push(CommanderAction::Confirm);
+                                }
+                                if ui.button("Close").clicked() {
+                                    actions.push(CommanderAction::Cancel);
+                                }
+                            });
+                            ui.label("Left / Right changes scale. A / Enter applies. B / Esc closes.");
+                        }
+                        DialogState::Favourites(favourites) => {
+                            ui.heading("Favourites");
+                            ui.add_space(8.0);
+                            if state.settings.favourites.is_empty() {
+                                ui.label("No favourite folders saved.");
+                            } else {
+                                for (index, favourite) in state.settings.favourites.iter().enumerate()
+                                {
+                                    let focused = index == favourites.focused_index;
+                                    let exists = std::path::Path::new(favourite).is_dir();
+                                    let label = if exists {
+                                        crate::fs::location_label(favourite).to_owned()
+                                    } else {
+                                        format!("{} (missing)", crate::fs::location_label(favourite))
+                                    };
+                                    let mut button = egui::Button::new(label);
+                                    if focused {
+                                        button = button
+                                            .fill(egui::Color32::from_rgb(73, 104, 94))
+                                            .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE));
+                                    }
+                                    if ui.add_sized([420.0, 34.0], button).clicked() {
+                                        actions.push(CommanderAction::FocusFavourite(index));
+                                        actions.push(CommanderAction::OpenFocusedFavourite);
+                                    }
+                                }
+                            }
+                            ui.add_space(10.0);
+                            ui.horizontal(|ui| {
+                                if ui.button("Add Current").clicked() {
+                                    actions.push(CommanderAction::AddFavourite);
+                                }
+                                if ui.button("Remove").clicked() {
+                                    actions.push(CommanderAction::RemoveFavourite);
+                                }
+                                if ui.button("Open").clicked() {
+                                    actions.push(CommanderAction::OpenFocusedFavourite);
+                                }
+                                if ui.button("Close").clicked() {
+                                    actions.push(CommanderAction::Cancel);
+                                }
+                            });
+                            ui.label("D-pad/arrow keys move. A / Enter opens. X / Space removes. B / Esc closes.");
                         }
                         DialogState::None | DialogState::TextInput(_) => {}
                     }
@@ -210,7 +289,8 @@ fn mapping_grid(ui: &mut egui::Ui) {
             mapping_row(ui, "Refresh", "Ctrl+R", "future command menu");
             mapping_row(ui, "Mark item", "future shortcut", "X");
             mapping_row(ui, "Command menu", "future shortcut", "Y");
-            mapping_row(ui, "Settings", "future shortcut", "Start / Menu");
+            mapping_row(ui, "Favourites", "F3 / Ctrl+F", "L3");
+            mapping_row(ui, "Settings", "Start / Menu", "Start / Menu");
             mapping_row(ui, "Start task demo", "button", "Y command menu");
             mapping_row(ui, "Cancel active task", "Esc / button", "B / command menu");
             mapping_row(ui, "Text modal focus", "Arrow keys", "D-pad");
