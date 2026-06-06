@@ -193,10 +193,8 @@ fn left_aligned_label(ui: &mut egui::Ui, width: f32, text: egui::RichText) {
         egui::vec2(width, ROW_HEIGHT),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
-            ui.add_sized(
-                [width, ROW_HEIGHT],
-                egui::Label::new(text).truncate().halign(egui::Align::Min),
-            );
+            ui.set_width(width);
+            ui.add(egui::Label::new(text).truncate());
         },
     );
 }
