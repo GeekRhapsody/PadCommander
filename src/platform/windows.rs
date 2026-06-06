@@ -68,3 +68,95 @@ pub fn delete_to_recycle_bin(paths: &[PathBuf]) -> Result<(), String> {
 pub fn delete_to_recycle_bin(_paths: &[PathBuf]) -> Result<(), String> {
     Err("Recycle Bin delete is only supported on Windows.".to_owned())
 }
+
+#[cfg(windows)]
+pub fn create_shortcut(
+    target_path: &std::path::Path,
+    shortcut_path: &std::path::Path,
+    working_directory: Option<&std::path::Path>,
+    icon_path: Option<&std::path::Path>,
+) -> Result<(), String> {
+    use windows::{
+        Win32::{
+            System::Com::{
+                CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
+                CoUninitialize, IPersistFile,
+            },
+            UI::Shell::{IShellLinkW, ShellLink},
+        },
+        core::{Interface, PCWSTR},
+    };
+
+    struct ComApartment;
+
+    impl ComApartment {
+        fn init() -> Result<Self, String> {
+            // SAFETY: Initializing COM for this thread with no reserved pointer.
+            unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
+                .ok()
+                .map_err(|error| format!("Cannot initialize COM: {error}"))?;
+            Ok(Self)
+        }
+    }
+
+    impl Drop for ComApartment {
+        fn drop(&mut self) {
+            // SAFETY: Balances a successful CoInitializeEx call on this thread.
+            unsafe { CoUninitialize() };
+        }
+    }
+
+    let _com = ComApartment::init()?;
+    let target = wide_null(target_path);
+    let shortcut = wide_null(shortcut_path);
+
+    // SAFETY: CoCreateInstance is called after COM initialization and returns a typed interface.
+    let shell_link: IShellLinkW =
+        unsafe { CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER) }
+            .map_err(|error| format!("Cannot create Shell Link COM object: {error}"))?;
+
+    // SAFETY: All PCWSTR values point to valid, NUL-terminated UTF-16 buffers alive for the call.
+    unsafe {
+        shell_link
+            .SetPath(PCWSTR(target.as_ptr()))
+            .map_err(|error| format!("Cannot set shortcut target: {error}"))?;
+
+        if let Some(working_directory) = working_directory {
+            let working_directory = wide_null(working_directory);
+            shell_link
+                .SetWorkingDirectory(PCWSTR(working_directory.as_ptr()))
+                .map_err(|error| format!("Cannot set shortcut working directory: {error}"))?;
+        }
+
+        if let Some(icon_path) = icon_path {
+            let icon_path = wide_null(icon_path);
+            shell_link
+                .SetIconLocation(PCWSTR(icon_path.as_ptr()), 0)
+                .map_err(|error| format!("Cannot set shortcut icon: {error}"))?;
+        }
+    }
+
+    let persist_file: IPersistFile = shell_link
+        .cast()
+        .map_err(|error| format!("Cannot access shortcut persistence API: {error}"))?;
+    // SAFETY: The shortcut path buffer is valid and NUL-terminated; true allows overwrite.
+    unsafe { persist_file.Save(PCWSTR(shortcut.as_ptr()), true) }
+        .map_err(|error| format!("Cannot save shortcut {}: {error}", shortcut_path.display()))
+}
+
+#[cfg(windows)]
+fn wide_null(path: &std::path::Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+
+    path.as_os_str().encode_wide().chain([0]).collect()
+}
+
+#[cfg(not(windows))]
+pub fn create_shortcut(
+    _target_path: &std::path::Path,
+    _shortcut_path: &std::path::Path,
+    _working_directory: Option<&std::path::Path>,
+    _icon_path: Option<&std::path::Path>,
+) -> Result<(), String> {
+    Err("Windows shortcuts are only supported on Windows.".to_owned())
+}

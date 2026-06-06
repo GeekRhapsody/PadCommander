@@ -1,8 +1,8 @@
 use eframe::egui;
 
-use crate::action::CommanderAction;
+use crate::{action::CommanderAction, state::AppState};
 
-pub fn show(ui: &mut egui::Ui, actions: &mut Vec<CommanderAction>) {
+pub fn show(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<CommanderAction>) {
     ui.vertical_centered(|ui| {
         ui.add_space(2.0);
         ui.horizontal_wrapped(|ui| {
@@ -24,6 +24,13 @@ pub fn show(ui: &mut egui::Ui, actions: &mut Vec<CommanderAction>) {
                 actions,
                 "Decompress",
                 CommanderAction::DecompressToOtherPane,
+            );
+            command_button_enabled(
+                ui,
+                actions,
+                "Shortcut",
+                CommanderAction::CreateShortcutInOtherPane,
+                state.can_create_shortcut_in_other_pane(),
             );
             command_button(ui, actions, "Settings", CommanderAction::OpenSettings);
             command_button(ui, actions, "Task Demo", CommanderAction::StartDemoTask);
@@ -53,6 +60,24 @@ fn command_button(
 ) {
     if ui
         .add_sized([128.0, 36.0], egui::Button::new(label))
+        .clicked()
+    {
+        actions.push(action);
+    }
+}
+
+fn command_button_enabled(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<CommanderAction>,
+    label: &'static str,
+    action: CommanderAction,
+    enabled: bool,
+) {
+    if ui
+        .add_enabled(
+            enabled,
+            egui::Button::new(label).min_size(egui::vec2(128.0, 36.0)),
+        )
         .clicked()
     {
         actions.push(action);

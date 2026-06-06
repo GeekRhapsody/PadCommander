@@ -1,13 +1,14 @@
 use crate::{
     action::{CommanderAction, FocusDirection, TextInputAction, TextInputPurpose},
     fs::{self, LocalFileSystem, VirtualFileSystem},
+    platform::windows,
     settings::{self, Settings, UI_SCALE_STEP},
     tasks::{TaskId, TaskKind, TaskManager, TaskStatus},
 };
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::SystemTime,
 };
 
@@ -17,6 +18,22 @@ const SCROLL_ROW_HEIGHT: f32 = 38.0;
 pub enum PaneSide {
     Left,
     Right,
+}
+
+impl PaneSide {
+    fn label(self) -> &'static str {
+        match self {
+            PaneSide::Left => "Left",
+            PaneSide::Right => "Right",
+        }
+    }
+
+    fn other(self) -> Self {
+        match self {
+            PaneSide::Left => PaneSide::Right,
+            PaneSide::Right => PaneSide::Left,
+        }
+    }
 }
 
 pub struct AppState {
@@ -72,10 +89,7 @@ impl AppState {
     }
 
     pub fn active_pane_label(&self) -> &'static str {
-        match self.active_pane {
-            PaneSide::Left => "Left",
-            PaneSide::Right => "Right",
-        }
+        self.active_pane.label()
     }
 
     pub fn dispatch_action(&mut self, action: CommanderAction) -> DispatchResult {
@@ -178,7 +192,7 @@ impl AppState {
                 self.begin_text_input(TextInputPurpose::ConnectFtp, String::new())
             }
             CommanderAction::CompressToOtherPane => self.begin_archive_name_input(),
-            CommanderAction::DecompressToOtherPane => self.begin_archive_destination_input(),
+            CommanderAction::DecompressToOtherPane => self.begin_archive_decompression_choices(),
             CommanderAction::OpenFavourites => {
                 self.dialog = DialogState::Favourites(FavouritesModalState::default());
                 self.status = "Favourites opened.".to_owned();
@@ -187,6 +201,7 @@ impl AppState {
             CommanderAction::RemoveFavourite => self.remove_focused_favourite(),
             CommanderAction::OpenFocusedFavourite => self.open_focused_favourite(),
             CommanderAction::FocusFavourite(index) => self.focus_favourite(index),
+            CommanderAction::FocusDecompressOption(index) => self.focus_decompress_option(index),
             CommanderAction::IncreaseUiScale => {
                 if matches!(self.dialog, DialogState::Settings(_)) {
                     self.adjust_ui_scale(UI_SCALE_STEP);
@@ -201,7 +216,9 @@ impl AppState {
                 if matches!(self.dialog, DialogState::Favourites(_)) {
                     self.add_active_location_to_favourites();
                 } else {
-                    self.dialog = DialogState::CommandMenu(CommandMenuState::default());
+                    self.dialog = DialogState::CommandMenu(CommandMenuState::new(
+                        self.can_create_shortcut_in_other_pane(),
+                    ));
                     self.status = "Command menu opened.".to_owned();
                 }
             }
@@ -223,6 +240,9 @@ impl AppState {
             CommanderAction::Delete => self.begin_delete_confirmation(),
             CommanderAction::CopyToOtherPane => self.start_transfer_task(TaskKind::Copy),
             CommanderAction::MoveToOtherPane => self.start_transfer_task(TaskKind::Move),
+            CommanderAction::CreateShortcutInOtherPane => {
+                self.begin_create_shortcut_in_other_pane()
+            }
             CommanderAction::StartDemoTask => self.start_demo_task(false),
             CommanderAction::StartFailingDemoTask => self.start_demo_task(true),
             CommanderAction::CancelActiveTask => {
@@ -230,9 +250,9 @@ impl AppState {
                     self.status = "No cancellable task is active.".to_owned();
                 }
             }
-            CommanderAction::UploadToOtherPane
-            | CommanderAction::DownloadToOtherPane
-            | CommanderAction::CreateShortcutInOtherPane => self.set_operation_todo_status(action),
+            CommanderAction::UploadToOtherPane | CommanderAction::DownloadToOtherPane => {
+                self.set_operation_todo_status(action)
+            }
         }
 
         DispatchResult::default()
@@ -473,6 +493,10 @@ impl AppState {
                 let confirm = confirm.clone();
                 self.start_delete_task(confirm);
             }
+            DialogState::ShortcutConflict(confirm) => {
+                let confirm = confirm.clone();
+                self.start_create_shortcut(confirm.request, true);
+            }
             DialogState::CommandMenu(menu) => {
                 let action = menu.selected_action();
                 self.dialog = DialogState::None;
@@ -483,6 +507,10 @@ impl AppState {
                 self.status = "Settings applied.".to_owned();
             }
             DialogState::Favourites(_) => self.open_focused_favourite(),
+            DialogState::Decompress(decompress) => {
+                let request = decompress.selected_request();
+                self.start_archive_decompression(request);
+            }
             DialogState::Message { .. } => {
                 self.dialog = DialogState::None;
                 self.status = "Confirmed placeholder dialog.".to_owned();
@@ -534,7 +562,7 @@ impl AppState {
                 return;
             }
             TextInputPurpose::ArchiveDestination => {
-                self.start_archive_decompression(value);
+                self.status = "Use Decompress to choose an extraction destination.".to_owned();
                 return;
             }
         };
@@ -577,6 +605,85 @@ impl AppState {
         self.delete_task_panes.insert(task_id, confirm.pane);
         self.dialog = DialogState::None;
         self.status = format!("{label} in background.");
+    }
+
+    fn begin_create_shortcut_in_other_pane(&mut self) {
+        let Some(request) = self.create_shortcut_request() else {
+            return;
+        };
+
+        if request.shortcut_path.exists() {
+            self.dialog = DialogState::ShortcutConflict(ShortcutConflictState { request });
+            self.status = "Shortcut already exists.".to_owned();
+        } else {
+            self.start_create_shortcut(request, false);
+        }
+    }
+
+    fn create_shortcut_request(&mut self) -> Option<ShortcutRequest> {
+        let target_side = self.inactive_pane_side();
+        let Some(entry) = self.active_pane().selected_markable_entry().cloned() else {
+            self.status = "Shortcut: select an EXE file first.".to_owned();
+            return None;
+        };
+
+        if !entry.is_exe_file() {
+            self.status = format!("{} is not an EXE file.", entry.display_name);
+            return None;
+        }
+
+        let target_location = self.pane(target_side).current_location.clone();
+        if target_location == fs::ROOTS_LOCATION {
+            self.status =
+                "Shortcut: choose a destination folder in the other pane first.".to_owned();
+            return None;
+        }
+
+        let target_path = PathBuf::from(&entry.virtual_path);
+        let shortcut_name = target_path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().to_string())
+            .filter(|stem| !stem.is_empty())
+            .map(|stem| format!("{stem}.lnk"))
+            .unwrap_or_else(|| format!("{}.lnk", entry.display_name));
+        let working_directory = target_path.parent().map(Path::to_path_buf);
+
+        Some(ShortcutRequest {
+            target_path: target_path.clone(),
+            shortcut_path: PathBuf::from(target_location).join(shortcut_name),
+            working_directory,
+            icon_path: Some(target_path),
+            target_side,
+        })
+    }
+
+    fn start_create_shortcut(&mut self, request: ShortcutRequest, overwrite: bool) {
+        if request.shortcut_path.exists() && !overwrite {
+            self.dialog = DialogState::ShortcutConflict(ShortcutConflictState { request });
+            self.status = "Shortcut already exists.".to_owned();
+            return;
+        }
+
+        let result = windows::create_shortcut(
+            &request.target_path,
+            &request.shortcut_path,
+            request.working_directory.as_deref(),
+            request.icon_path.as_deref(),
+        );
+
+        self.dialog = DialogState::None;
+        match result {
+            Ok(()) => {
+                self.refresh_pane(request.target_side);
+                self.status = format!("Created shortcut {}.", request.shortcut_path.display());
+            }
+            Err(error) => {
+                self.status = format!(
+                    "Cannot create shortcut {}: {error}",
+                    request.shortcut_path.display()
+                );
+            }
+        }
     }
 
     fn start_transfer_task(&mut self, kind: TaskKind) {
@@ -651,7 +758,7 @@ impl AppState {
         self.begin_text_input(TextInputPurpose::ArchiveName, "archive.zip".to_owned());
     }
 
-    fn begin_archive_destination_input(&mut self) {
+    fn begin_archive_decompression_choices(&mut self) {
         let Some(archive) = self.active_pane().selected_markable_entry().cloned() else {
             self.status = "Decompress: select an archive first.".to_owned();
             return;
@@ -668,19 +775,19 @@ impl AppState {
             return;
         }
 
-        let target_side = self.inactive_pane_side();
-        let target_location = self.pane(target_side).current_location.clone();
-        if target_location == fs::ROOTS_LOCATION {
-            self.status = "Decompress: choose a target folder in the other pane first.".to_owned();
-            return;
-        }
-
-        let initial = PathBuf::from(&archive.display_name)
+        let archive_stem = PathBuf::from(&archive.display_name)
             .file_stem()
             .map(|stem| stem.to_string_lossy().to_string())
             .filter(|stem| !stem.is_empty())
             .unwrap_or_else(|| "extracted".to_owned());
-        self.begin_text_input(TextInputPurpose::ArchiveDestination, initial);
+
+        self.dialog = DialogState::Decompress(DecompressModalState {
+            focused_index: 0,
+            archive,
+            archive_stem,
+            source_side: self.active_pane,
+        });
+        self.status = "Choose decompression destination.".to_owned();
     }
 
     fn start_archive_compression(&mut self, archive_name: String) {
@@ -725,38 +832,33 @@ impl AppState {
         pane.marked_items.clear();
     }
 
-    fn start_archive_decompression(&mut self, destination_name: String) {
-        let target_side = self.inactive_pane_side();
-        let Some(archive) = self.active_pane().selected_markable_entry().cloned() else {
-            self.status = "Decompress: select an archive first.".to_owned();
-            return;
-        };
-
-        if archive.kind != FileEntryKind::Archive
-            || !archive_name_is_supported(&archive.display_name)
-        {
-            self.status =
-                "Unsupported archive type. Supported types are .zip, .rar, and .7z.".to_owned();
-            return;
-        }
-
-        let target_location = self.pane(target_side).current_location.clone();
+    fn start_archive_decompression(&mut self, request: DecompressRequest) {
+        let target_location = self.pane(request.target_side).current_location.clone();
         if target_location == fs::ROOTS_LOCATION {
-            self.status = "Decompress: choose a target folder in the other pane first.".to_owned();
+            self.status = format!(
+                "Decompress: choose a target folder in the {} pane first.",
+                request.target_side.label().to_ascii_lowercase()
+            );
             return;
         }
 
-        let archive_path = PathBuf::from(&archive.virtual_path);
-        let destination = PathBuf::from(&target_location).join(&destination_name);
+        let archive_path = PathBuf::from(&request.archive.virtual_path);
+        let destination = if request.create_archive_folder {
+            PathBuf::from(&target_location).join(&request.archive_stem)
+        } else {
+            PathBuf::from(&target_location)
+        };
         let label = format!(
             "Decompress {} to {}",
-            archive.display_name,
+            request.archive.display_name,
             destination.display()
         );
         let task_id =
             self.task_manager
                 .spawn_decompress_archive(label.clone(), archive_path, destination);
-        self.transfer_task_panes.insert(task_id, vec![target_side]);
+        self.transfer_task_panes
+            .insert(task_id, vec![request.target_side]);
+        self.dialog = DialogState::None;
         self.status = format!("{label} in background.");
     }
 
@@ -853,10 +955,15 @@ impl AppState {
                 favourites.move_focus(movement, self.settings.favourites.len());
                 true
             }
+            DialogState::Decompress(decompress) => {
+                decompress.move_focus(movement);
+                true
+            }
             DialogState::None
             | DialogState::Message { .. }
             | DialogState::TextInput(_)
-            | DialogState::DeleteConfirm(_) => false,
+            | DialogState::DeleteConfirm(_)
+            | DialogState::ShortcutConflict(_) => false,
         }
     }
 
@@ -959,6 +1066,14 @@ impl AppState {
         }
     }
 
+    fn focus_decompress_option(&mut self, index: usize) {
+        let DialogState::Decompress(decompress) = &mut self.dialog else {
+            return;
+        };
+
+        decompress.focused_index = index.min(DecompressChoice::COUNT - 1);
+    }
+
     fn remember_pane_location(&mut self, side: PaneSide) {
         let location = self.pane(side).current_location.clone();
         match side {
@@ -992,15 +1107,24 @@ impl AppState {
         matches!(self.dialog, DialogState::Settings(_))
     }
 
+    pub fn can_create_shortcut_in_other_pane(&self) -> bool {
+        self.active_pane()
+            .selected_markable_entry()
+            .map(FileEntry::is_exe_file)
+            .unwrap_or(false)
+    }
+
     fn text_dialog_mut(&mut self) -> Option<&mut TextInputDialogState> {
         match &mut self.dialog {
             DialogState::TextInput(dialog) => Some(dialog),
             DialogState::None
             | DialogState::Message { .. }
             | DialogState::DeleteConfirm(_)
+            | DialogState::ShortcutConflict(_)
             | DialogState::CommandMenu(_)
             | DialogState::Settings(_)
-            | DialogState::Favourites(_) => None,
+            | DialogState::Favourites(_)
+            | DialogState::Decompress(_) => None,
         }
     }
 }
@@ -1197,6 +1321,15 @@ impl FileEntry {
         fs::modified_label(self.modified)
     }
 
+    pub fn is_exe_file(&self) -> bool {
+        self.kind == FileEntryKind::File
+            && Path::new(&self.virtual_path)
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .map(|extension| extension.eq_ignore_ascii_case("exe"))
+                .unwrap_or(false)
+    }
+
     pub fn is_available_source(&self) -> bool {
         !matches!(self.kind, FileEntryKind::Parent | FileEntryKind::Drive)
     }
@@ -1257,9 +1390,11 @@ pub enum DialogState {
     Message { title: String, message: String },
     TextInput(TextInputDialogState),
     DeleteConfirm(DeleteConfirmationState),
+    ShortcutConflict(ShortcutConflictState),
     CommandMenu(CommandMenuState),
     Settings(SettingsModalState),
     Favourites(FavouritesModalState),
+    Decompress(DecompressModalState),
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -1315,6 +1450,94 @@ impl FavouritesModalState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DecompressModalState {
+    pub focused_index: usize,
+    pub archive: FileEntry,
+    pub archive_stem: String,
+    pub source_side: PaneSide,
+}
+
+impl DecompressModalState {
+    pub fn choices(&self) -> [DecompressChoice; DecompressChoice::COUNT] {
+        [
+            DecompressChoice::Here,
+            DecompressChoice::HereToArchiveFolder,
+            DecompressChoice::OtherPane,
+            DecompressChoice::OtherPaneToArchiveFolder,
+        ]
+    }
+
+    pub fn move_focus(&mut self, movement: SelectionMovement) {
+        let last_index = DecompressChoice::COUNT - 1;
+        self.focused_index = match movement {
+            SelectionMovement::Up | SelectionMovement::PageUp => {
+                self.focused_index.saturating_sub(1)
+            }
+            SelectionMovement::Down | SelectionMovement::PageDown => {
+                (self.focused_index + 1).min(last_index)
+            }
+            SelectionMovement::Home => 0,
+            SelectionMovement::End => last_index,
+        };
+    }
+
+    fn selected_request(&self) -> DecompressRequest {
+        let choice = self.choices()[self.focused_index.min(DecompressChoice::COUNT - 1)];
+        DecompressRequest {
+            archive: self.archive.clone(),
+            archive_stem: self.archive_stem.clone(),
+            target_side: choice.target_side(self.source_side),
+            create_archive_folder: choice.create_archive_folder(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DecompressChoice {
+    Here,
+    HereToArchiveFolder,
+    OtherPane,
+    OtherPaneToArchiveFolder,
+}
+
+impl DecompressChoice {
+    pub const COUNT: usize = 4;
+
+    pub fn label(self, archive_stem: &str) -> String {
+        match self {
+            Self::Here => "Decompress here".to_owned(),
+            Self::HereToArchiveFolder => format!("Decompress here to {archive_stem}"),
+            Self::OtherPane => "Decompress on other pane".to_owned(),
+            Self::OtherPaneToArchiveFolder => {
+                format!("Decompress on other pane to {archive_stem}")
+            }
+        }
+    }
+
+    fn target_side(self, source_side: PaneSide) -> PaneSide {
+        match self {
+            Self::Here | Self::HereToArchiveFolder => source_side,
+            Self::OtherPane | Self::OtherPaneToArchiveFolder => source_side.other(),
+        }
+    }
+
+    fn create_archive_folder(self) -> bool {
+        matches!(
+            self,
+            Self::HereToArchiveFolder | Self::OtherPaneToArchiveFolder
+        )
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct DecompressRequest {
+    archive: FileEntry,
+    archive_stem: String,
+    target_side: PaneSide,
+    create_archive_folder: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommandMenuState {
     pub focused_index: usize,
     pub entries: Vec<CommandMenuEntry>,
@@ -1322,26 +1545,42 @@ pub struct CommandMenuState {
 
 impl Default for CommandMenuState {
     fn default() -> Self {
-        Self {
-            focused_index: 0,
-            entries: vec![
-                CommandMenuEntry::new("Create Folder", CommanderAction::CreateFolder),
-                CommandMenuEntry::new("Create Text File", CommanderAction::CreateTextFile),
-                CommandMenuEntry::new("Copy", CommanderAction::CopyToOtherPane),
-                CommandMenuEntry::new("Move", CommanderAction::MoveToOtherPane),
-                CommandMenuEntry::new("Compress", CommanderAction::CompressToOtherPane),
-                CommandMenuEntry::new("Decompress", CommanderAction::DecompressToOtherPane),
-                CommandMenuEntry::new("Rename", CommanderAction::Rename),
-                CommandMenuEntry::new("Delete", CommanderAction::Delete),
-                CommandMenuEntry::new("Task Demo", CommanderAction::StartDemoTask),
-                CommandMenuEntry::new("Failing Task Demo", CommanderAction::StartFailingDemoTask),
-                CommandMenuEntry::new("Cancel Task", CommanderAction::CancelActiveTask),
-            ],
-        }
+        Self::new(false)
     }
 }
 
 impl CommandMenuState {
+    pub fn new(include_create_shortcut: bool) -> Self {
+        let mut entries = vec![
+            CommandMenuEntry::new("Create Folder", CommanderAction::CreateFolder),
+            CommandMenuEntry::new("Create Text File", CommanderAction::CreateTextFile),
+        ];
+
+        if include_create_shortcut {
+            entries.push(CommandMenuEntry::new(
+                "Create Shortcut",
+                CommanderAction::CreateShortcutInOtherPane,
+            ));
+        }
+
+        entries.extend([
+            CommandMenuEntry::new("Copy", CommanderAction::CopyToOtherPane),
+            CommandMenuEntry::new("Move", CommanderAction::MoveToOtherPane),
+            CommandMenuEntry::new("Compress", CommanderAction::CompressToOtherPane),
+            CommandMenuEntry::new("Decompress", CommanderAction::DecompressToOtherPane),
+            CommandMenuEntry::new("Rename", CommanderAction::Rename),
+            CommandMenuEntry::new("Delete", CommanderAction::Delete),
+            CommandMenuEntry::new("Task Demo", CommanderAction::StartDemoTask),
+            CommandMenuEntry::new("Failing Task Demo", CommanderAction::StartFailingDemoTask),
+            CommandMenuEntry::new("Cancel Task", CommanderAction::CancelActiveTask),
+        ]);
+
+        Self {
+            focused_index: 0,
+            entries,
+        }
+    }
+
     pub fn move_focus(&mut self, movement: SelectionMovement) {
         if self.entries.is_empty() {
             self.focused_index = 0;
@@ -1379,6 +1618,30 @@ impl CommandMenuEntry {
     fn new(label: &'static str, action: CommanderAction) -> Self {
         Self { label, action }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ShortcutConflictState {
+    request: ShortcutRequest,
+}
+
+impl ShortcutConflictState {
+    pub fn shortcut_path(&self) -> &Path {
+        &self.request.shortcut_path
+    }
+
+    pub fn target_path(&self) -> &Path {
+        &self.request.target_path
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ShortcutRequest {
+    target_path: PathBuf,
+    shortcut_path: PathBuf,
+    working_directory: Option<PathBuf>,
+    icon_path: Option<PathBuf>,
+    target_side: PaneSide,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2024,6 +2287,35 @@ mod tests {
         assert_eq!(names, ["b", "c"]);
         assert_eq!(state.left_pane.marked_summary().count, 2);
         assert_eq!(state.left_pane.marked_summary().total_size, 2048);
+    }
+
+    #[test]
+    fn create_shortcut_action_is_available_only_for_exe_files() {
+        let mut state = test_state();
+        state.left_pane.entries = vec![
+            FileEntry {
+                display_name: "tool.exe".to_owned(),
+                virtual_path: r"C:\Apps\tool.exe".to_owned(),
+                kind: FileEntryKind::File,
+                size: Some(1024),
+                modified: None,
+                flags: FileEntryFlags::default(),
+            },
+            FileEntry {
+                display_name: "notes.txt".to_owned(),
+                virtual_path: r"C:\Apps\notes.txt".to_owned(),
+                kind: FileEntryKind::File,
+                size: Some(1024),
+                modified: None,
+                flags: FileEntryFlags::default(),
+            },
+        ];
+
+        state.left_pane.selected_index = 0;
+        assert!(state.can_create_shortcut_in_other_pane());
+
+        state.left_pane.selected_index = 1;
+        assert!(!state.can_create_shortcut_in_other_pane());
     }
 
     #[test]

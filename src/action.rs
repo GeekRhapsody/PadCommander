@@ -37,6 +37,7 @@ pub enum CommanderAction {
     RemoveFavourite,
     OpenFocusedFavourite,
     FocusFavourite(usize),
+    FocusDecompressOption(usize),
     IncreaseUiScale,
     DecreaseUiScale,
     OpenCommandPalette,

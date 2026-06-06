@@ -23,7 +23,7 @@ pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<CommanderAction> {
     egui::Panel::bottom("command_bar")
         .exact_size(112.0)
         .frame(panel_frame(egui::Color32::from_rgb(28, 31, 33)))
-        .show_inside(ui, |ui| action_bar::show(ui, &mut actions));
+        .show_inside(ui, |ui| action_bar::show(ui, state, &mut actions));
 
     egui::Panel::bottom("task_progress")
         .exact_size(118.0)
@@ -72,9 +72,11 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
     let dialog = match &state.dialog {
         DialogState::Message { .. }
         | DialogState::DeleteConfirm(_)
+        | DialogState::ShortcutConflict(_)
         | DialogState::CommandMenu(_)
         | DialogState::Settings(_)
-        | DialogState::Favourites(_) => &state.dialog,
+        | DialogState::Favourites(_)
+        | DialogState::Decompress(_) => &state.dialog,
         DialogState::None | DialogState::TextInput(_) => return,
     };
 
@@ -123,6 +125,27 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                     actions.push(CommanderAction::Cancel);
                                 }
                                 ui.label("A / Enter confirms. B / Esc cancels.");
+                            });
+                        }
+                        DialogState::ShortcutConflict(confirm) => {
+                            ui.heading("Overwrite Shortcut");
+                            ui.label(format!(
+                                "{} already exists.",
+                                confirm.shortcut_path().display()
+                            ));
+                            ui.label(format!(
+                                "Target: {}",
+                                confirm.target_path().display()
+                            ));
+                            ui.add_space(10.0);
+                            ui.horizontal(|ui| {
+                                if ui.button("Overwrite").clicked() {
+                                    actions.push(CommanderAction::Confirm);
+                                }
+                                if ui.button("Cancel").clicked() {
+                                    actions.push(CommanderAction::Cancel);
+                                }
+                                ui.label("A / Enter overwrites. B / Esc cancels.");
                             });
                         }
                         DialogState::CommandMenu(menu) => {
@@ -218,6 +241,26 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 }
                             });
                             ui.label("D-pad/arrow keys move. A / Enter opens. X / Space removes. B / Esc closes.");
+                        }
+                        DialogState::Decompress(decompress) => {
+                            ui.heading("Decompress");
+                            ui.label(&decompress.archive.display_name);
+                            ui.add_space(8.0);
+                            for (index, choice) in decompress.choices().iter().enumerate() {
+                                let focused = index == decompress.focused_index;
+                                let mut button = egui::Button::new(choice.label(&decompress.archive_stem));
+                                if focused {
+                                    button = button
+                                        .fill(egui::Color32::from_rgb(73, 104, 94))
+                                        .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE));
+                                }
+                                if ui.add_sized([360.0, 34.0], button).clicked() {
+                                    actions.push(CommanderAction::FocusDecompressOption(index));
+                                    actions.push(CommanderAction::Confirm);
+                                }
+                            }
+                            ui.add_space(8.0);
+                            ui.label("D-pad/arrow keys move. A / Enter selects. B / Esc cancels.");
                         }
                         DialogState::None | DialogState::TextInput(_) => {}
                     }

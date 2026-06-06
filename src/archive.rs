@@ -235,10 +235,6 @@ fn zip_extract_archive(
     archive_path: PathBuf,
     destination: PathBuf,
 ) -> TaskOutcome {
-    if let Err(error) = prepare_new_destination(&destination) {
-        return TaskOutcome::Failed(error);
-    }
-
     let file = match fs::File::open(&archive_path) {
         Ok(file) => file,
         Err(error) => {
@@ -258,16 +254,17 @@ fn zip_extract_archive(
         Err(error) => return TaskOutcome::Failed(error),
     };
 
+    let destination_cleanup = match prepare_extract_destination(&destination) {
+        Ok(cleanup) => cleanup,
+        Err(error) => return TaskOutcome::Failed(error),
+    };
+
     reporter.progress(ProgressSnapshot {
         current_file: Some(format!("Extracting {}", archive_path.display())),
         total_bytes: Some(plan.total_bytes),
         total_items: Some(plan.entries.len() as u64),
         ..ProgressSnapshot::default()
     });
-
-    if let Err(error) = fs::create_dir(&destination) {
-        return TaskOutcome::Failed(format!("Cannot create {}: {error}", destination.display()));
-    }
 
     let mut tracker = ArchiveProgressTracker::new(LocalArchiveTotals {
         bytes: plan.total_bytes,
@@ -276,12 +273,12 @@ fn zip_extract_archive(
 
     for entry in plan.entries {
         if reporter.is_cancelled() {
-            let _ = fs::remove_dir_all(&destination);
+            destination_cleanup.clean_up(&destination);
             return TaskOutcome::Cancelled;
         }
 
         if let Err(error) = zip_extract_entry(&reporter, &mut tracker, &mut archive, &entry) {
-            let _ = fs::remove_dir_all(&destination);
+            destination_cleanup.clean_up(&destination);
             if error == "Task cancelled." {
                 return TaskOutcome::Cancelled;
             }
@@ -487,10 +484,6 @@ fn external_extract_archive(
     archive_path: PathBuf,
     destination: PathBuf,
 ) -> TaskOutcome {
-    if let Err(error) = prepare_new_destination(&destination) {
-        return TaskOutcome::Failed(error);
-    }
-
     let tool = match find_command(&["7z", "7za", "7zz"]) {
         Some(tool) => tool,
         None => {
@@ -512,9 +505,10 @@ fn external_extract_archive(
         }
     }
 
-    if let Err(error) = fs::create_dir(&destination) {
-        return TaskOutcome::Failed(format!("Cannot create {}: {error}", destination.display()));
-    }
+    let destination_cleanup = match prepare_extract_destination(&destination) {
+        Ok(cleanup) => cleanup,
+        Err(error) => return TaskOutcome::Failed(error),
+    };
 
     reporter.progress(ProgressSnapshot {
         current_file: Some(format!("Extracting {}", archive_path.display())),
@@ -536,11 +530,11 @@ fn external_extract_archive(
             bytes_done: 0,
         }),
         Err(error) if error == "Task cancelled." => {
-            let _ = fs::remove_dir_all(&destination);
+            destination_cleanup.clean_up(&destination);
             TaskOutcome::Cancelled
         }
         Err(error) => {
-            let _ = fs::remove_dir_all(&destination);
+            destination_cleanup.clean_up(&destination);
             TaskOutcome::Failed(error)
         }
     }
@@ -970,9 +964,30 @@ fn archive_path_totals(path: &Path) -> Result<LocalArchiveTotals, io::Error> {
     Ok(totals)
 }
 
-fn prepare_new_destination(destination: &Path) -> Result<(), String> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExtractDestinationCleanup {
+    None,
+    RemoveCreatedDirectory,
+}
+
+impl ExtractDestinationCleanup {
+    fn clean_up(self, destination: &Path) {
+        if self == Self::RemoveCreatedDirectory {
+            let _ = fs::remove_dir_all(destination);
+        }
+    }
+}
+
+fn prepare_extract_destination(destination: &Path) -> Result<ExtractDestinationCleanup, String> {
+    if destination.is_dir() {
+        return Ok(ExtractDestinationCleanup::None);
+    }
+
     if destination.exists() {
-        return Err(format!("{} already exists.", destination.display()));
+        return Err(format!(
+            "{} exists but is not a folder.",
+            destination.display()
+        ));
     }
 
     let parent = destination
@@ -985,7 +1000,10 @@ fn prepare_new_destination(destination: &Path) -> Result<(), String> {
         ));
     }
 
-    Ok(())
+    fs::create_dir(destination)
+        .map_err(|error| format!("Cannot create {}: {error}", destination.display()))?;
+
+    Ok(ExtractDestinationCleanup::RemoveCreatedDirectory)
 }
 
 pub fn safe_archive_output_path(destination: &Path, entry_name: &str) -> Result<PathBuf, String> {
