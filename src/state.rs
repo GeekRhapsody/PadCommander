@@ -1188,17 +1188,6 @@ impl FileEntry {
         fs::modified_label(self.modified)
     }
 
-    pub fn flags_label(&self) -> String {
-        let mut flags = Vec::new();
-        if self.flags.hidden {
-            flags.push("H");
-        }
-        if self.flags.read_only {
-            flags.push("R");
-        }
-        flags.join(" ")
-    }
-
     pub fn is_available_source(&self) -> bool {
         !matches!(self.kind, FileEntryKind::Parent | FileEntryKind::Drive)
     }

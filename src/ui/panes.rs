@@ -5,6 +5,12 @@ use crate::{
     state::{AppState, FileEntry, PaneLoadState, PaneSide, PaneState},
 };
 
+const TYPE_COLUMN_WIDTH: f32 = 82.0;
+const SIZE_COLUMN_WIDTH: f32 = 74.0;
+const MODIFIED_COLUMN_WIDTH: f32 = 90.0;
+const MIN_NAME_COLUMN_WIDTH: f32 = 120.0;
+const ROW_HEIGHT: f32 = 24.0;
+
 pub fn show(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<CommanderAction>) {
     ui.columns(2, |columns| {
         pane(
@@ -121,16 +127,17 @@ fn pane_load_state(ui: &mut egui::Ui, load_state: &PaneLoadState) {
 
 fn header_row(ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
-        ui.set_height(24.0);
-        ui.strong("Name");
-        ui.add_space(220.0);
-        ui.strong("Type");
-        ui.add_space(64.0);
-        ui.strong("Size");
-        ui.add_space(64.0);
-        ui.strong("Modified");
-        ui.add_space(64.0);
-        ui.strong("Flags");
+        ui.set_height(ROW_HEIGHT);
+        let name_width = name_column_width(ui);
+
+        left_aligned_label(ui, name_width, egui::RichText::new("Name").strong());
+        left_aligned_label(ui, TYPE_COLUMN_WIDTH, egui::RichText::new("Type").strong());
+        left_aligned_label(ui, SIZE_COLUMN_WIDTH, egui::RichText::new("Size").strong());
+        left_aligned_label(
+            ui,
+            MODIFIED_COLUMN_WIDTH,
+            egui::RichText::new("Modified").strong(),
+        );
     });
 }
 
@@ -156,26 +163,40 @@ fn row_contents(
 
     ui.horizontal(|ui| {
         ui.set_height(28.0);
+        let name_width = name_column_width(ui);
+
+        left_aligned_label(ui, name_width, egui::RichText::new(name).color(text_color));
         ui.add_sized(
-            [240.0, 24.0],
-            egui::Label::new(egui::RichText::new(name).color(text_color)).truncate(),
-        );
-        ui.add_sized(
-            [82.0, 24.0],
+            [TYPE_COLUMN_WIDTH, ROW_HEIGHT],
             egui::Label::new(egui::RichText::new(entry.kind_label()).color(text_color)).truncate(),
         );
         ui.add_sized(
-            [74.0, 24.0],
+            [SIZE_COLUMN_WIDTH, ROW_HEIGHT],
             egui::Label::new(egui::RichText::new(entry.size_label()).color(text_color)).truncate(),
         );
         ui.add_sized(
-            [90.0, 24.0],
+            [MODIFIED_COLUMN_WIDTH, ROW_HEIGHT],
             egui::Label::new(egui::RichText::new(entry.modified_label()).color(text_color))
                 .truncate(),
         );
-        ui.add_sized(
-            [48.0, 24.0],
-            egui::Label::new(egui::RichText::new(entry.flags_label()).color(text_color)).truncate(),
-        );
     });
+}
+
+fn name_column_width(ui: &egui::Ui) -> f32 {
+    let spacing = ui.spacing().item_spacing.x;
+    let fixed_width = TYPE_COLUMN_WIDTH + SIZE_COLUMN_WIDTH + MODIFIED_COLUMN_WIDTH + spacing * 3.0;
+    (ui.available_width() - fixed_width).max(MIN_NAME_COLUMN_WIDTH)
+}
+
+fn left_aligned_label(ui: &mut egui::Ui, width: f32, text: egui::RichText) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, ROW_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.add_sized(
+                [width, ROW_HEIGHT],
+                egui::Label::new(text).truncate().halign(egui::Align::Min),
+            );
+        },
+    );
 }
