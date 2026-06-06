@@ -11,7 +11,7 @@ use std::{
     time::SystemTime,
 };
 
-const SCROLL_ROW_HEIGHT: f32 = 29.0;
+const SCROLL_ROW_HEIGHT: f32 = 38.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PaneSide {
@@ -1066,9 +1066,18 @@ impl PaneState {
     }
 
     pub fn marked_summary(&self) -> MarkedSummary {
+        if self.marked_items.is_empty() {
+            return MarkedSummary::default();
+        }
+
         let mut summary = MarkedSummary::default();
 
-        for entry in self.marked_entries() {
+        for entry in self
+            .entries
+            .iter()
+            .filter(|entry| self.marked_items.contains(&entry.virtual_path))
+            .filter(|entry| entry.is_available_source())
+        {
             summary.count += 1;
             if let Some(size) = entry.size {
                 summary.total_size = summary.total_size.saturating_add(size);

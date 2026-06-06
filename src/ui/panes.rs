@@ -10,6 +10,7 @@ const SIZE_COLUMN_WIDTH: f32 = 74.0;
 const MODIFIED_COLUMN_WIDTH: f32 = 90.0;
 const MIN_NAME_COLUMN_WIDTH: f32 = 120.0;
 const ROW_HEIGHT: f32 = 24.0;
+const ENTRY_ROW_HEIGHT: f32 = 38.0;
 
 pub fn show(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<CommanderAction>) {
     ui.columns(2, |columns| {
@@ -76,8 +77,9 @@ fn pane(
                 })
                 .auto_shrink([false, false])
                 .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
-                .show(ui, |ui| {
-                    for (index, entry) in pane.entries.iter().enumerate() {
+                .show_rows(ui, ENTRY_ROW_HEIGHT, pane.entries.len(), |ui, row_range| {
+                    for index in row_range {
+                        let entry = &pane.entries[index];
                         let selected = is_active && index == pane.selected_index;
                         let marked = pane.marked_items.contains(&entry.virtual_path);
                         let disabled = !entry.is_available_source();
