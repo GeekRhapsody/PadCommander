@@ -12,8 +12,6 @@ use std::{
     time::SystemTime,
 };
 
-const SCROLL_ROW_HEIGHT: f32 = 38.0;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PaneSide {
     Left,
@@ -145,7 +143,15 @@ impl AppState {
                 self.go_parent(self.active_pane);
             }
             CommanderAction::UpdatePaneScrollOffset { pane, offset } => {
-                self.pane_mut(pane).scroll_offset = offset.max(0) as f32;
+                let pane = self.pane_mut(pane);
+                if !pane.needs_scroll_to_selected {
+                    pane.scroll_offset = offset.max(0) as f32;
+                }
+            }
+            CommanderAction::PaneScrollToSelectedIssued { pane, offset } => {
+                let pane = self.pane_mut(pane);
+                pane.scroll_offset = offset.max(0) as f32;
+                pane.needs_scroll_to_selected = false;
             }
             CommanderAction::Refresh => {
                 self.refresh_pane(self.active_pane);
@@ -956,9 +962,8 @@ impl AppState {
             Err(error) => {
                 let message = error.user_message();
                 pane.entries.clear();
-                pane.selected_index = 0;
+                pane.reset_selection();
                 pane.marked_items.clear();
-                pane.scroll_offset = 0.0;
                 pane.load_state = PaneLoadState::Error(message.clone());
                 self.status = message;
             }
@@ -1182,6 +1187,7 @@ pub struct PaneState {
     pub marked_items: BTreeSet<String>,
     pub load_state: PaneLoadState,
     pub scroll_offset: f32,
+    pub needs_scroll_to_selected: bool,
     navigation_history: Vec<NavigationSnapshot>,
 }
 
@@ -1195,6 +1201,7 @@ impl PaneState {
             marked_items: BTreeSet::new(),
             load_state: PaneLoadState::Loading,
             scroll_offset: 0.0,
+            needs_scroll_to_selected: true,
             navigation_history: Vec::new(),
         }
     }
@@ -1210,21 +1217,20 @@ impl PaneState {
 
     pub fn select_index(&mut self, index: usize) {
         if self.entries.is_empty() {
-            self.selected_index = 0;
+            self.reset_selection();
         } else {
-            self.selected_index = index.min(self.entries.len() - 1);
+            self.set_selected_index(index);
         }
-        self.follow_selection();
     }
 
     pub fn move_selection(&mut self, movement: SelectionMovement) {
         if self.entries.is_empty() {
-            self.selected_index = 0;
+            self.reset_selection();
             return;
         }
 
         let last_index = self.entries.len() - 1;
-        self.selected_index = match movement {
+        let next_index = match movement {
             SelectionMovement::Up => self.selected_index.saturating_sub(1),
             SelectionMovement::Down => (self.selected_index + 1).min(last_index),
             SelectionMovement::PageUp => self.selected_index.saturating_sub(PAGE_SIZE),
@@ -1232,7 +1238,7 @@ impl PaneState {
             SelectionMovement::Home => 0,
             SelectionMovement::End => last_index,
         };
-        self.follow_selection();
+        self.set_selected_index(next_index);
     }
 
     pub fn marked_summary(&self) -> MarkedSummary {
@@ -1291,23 +1297,34 @@ impl PaneState {
 
     fn restore_selection(&mut self, previous_selection_path: Option<&str>) {
         if self.entries.is_empty() {
-            self.selected_index = 0;
-            self.scroll_offset = 0.0;
+            self.reset_selection();
             return;
         }
 
-        self.selected_index = previous_selection_path
+        let selected_index = previous_selection_path
             .and_then(|path| {
                 self.entries
                     .iter()
                     .position(|entry| entry.virtual_path == path)
             })
             .unwrap_or(if self.entries.len() > 1 { 1 } else { 0 });
-        self.follow_selection();
+        self.set_selected_index(selected_index);
     }
 
-    fn follow_selection(&mut self) {
-        self.scroll_offset = self.selected_index as f32 * SCROLL_ROW_HEIGHT;
+    fn set_selected_index(&mut self, index: usize) {
+        if self.entries.is_empty() {
+            self.reset_selection();
+            return;
+        }
+
+        self.selected_index = index.min(self.entries.len() - 1);
+        self.needs_scroll_to_selected = true;
+    }
+
+    fn reset_selection(&mut self) {
+        self.selected_index = 0;
+        self.scroll_offset = 0.0;
+        self.needs_scroll_to_selected = false;
     }
 
     fn navigation_snapshot(&self) -> NavigationSnapshot {
@@ -1322,11 +1339,13 @@ impl PaneState {
         if self.entries.is_empty() {
             self.selected_index = 0;
             self.scroll_offset = 0.0;
+            self.needs_scroll_to_selected = false;
             return;
         }
 
         self.selected_index = snapshot.selected_index.min(self.entries.len() - 1);
         self.scroll_offset = snapshot.scroll_offset.max(0.0);
+        self.needs_scroll_to_selected = false;
     }
 }
 
@@ -2249,6 +2268,7 @@ mod tests {
                 marked_items: BTreeSet::new(),
                 load_state: PaneLoadState::Ready,
                 scroll_offset: 0.0,
+                needs_scroll_to_selected: false,
                 navigation_history: Vec::new(),
             },
             right_pane: PaneState {
@@ -2259,6 +2279,7 @@ mod tests {
                 marked_items: BTreeSet::new(),
                 load_state: PaneLoadState::Ready,
                 scroll_offset: 0.0,
+                needs_scroll_to_selected: false,
                 navigation_history: Vec::new(),
             },
             active_pane: PaneSide::Left,
@@ -2402,6 +2423,7 @@ mod tests {
             marked_items: BTreeSet::from(["missing".to_owned(), "c".to_owned()]),
             load_state: PaneLoadState::Ready,
             scroll_offset: 0.0,
+            needs_scroll_to_selected: false,
             navigation_history: Vec::new(),
         };
 
@@ -2410,8 +2432,66 @@ mod tests {
         pane.restore_selection(Some("b"));
 
         assert_eq!(pane.selected_index, 1);
+        assert!(pane.needs_scroll_to_selected);
         assert!(pane.marked_items.contains("c"));
         assert!(!pane.marked_items.contains("missing"));
+    }
+
+    #[test]
+    fn restore_selection_requests_scroll_when_selection_falls_back_to_top() {
+        let mut pane = PaneState {
+            title: "Test".to_owned(),
+            current_location: fs::ROOTS_LOCATION.to_owned(),
+            entries: vec![test_entry("missing")],
+            selected_index: 0,
+            marked_items: BTreeSet::new(),
+            load_state: PaneLoadState::Ready,
+            scroll_offset: 420.0,
+            needs_scroll_to_selected: false,
+            navigation_history: Vec::new(),
+        };
+
+        pane.entries = vec![test_entry("replacement")];
+        pane.restore_selection(Some("missing"));
+
+        assert_eq!(pane.selected_index, 0);
+        assert_eq!(pane.scroll_offset, 420.0);
+        assert!(pane.needs_scroll_to_selected);
+    }
+
+    #[test]
+    fn selection_movement_requests_scroll_even_when_clamped_at_boundary() {
+        let mut state = test_state();
+        state.left_pane.selected_index = 0;
+        state.left_pane.needs_scroll_to_selected = false;
+
+        state.dispatch_action(CommanderAction::MoveSelectionUp);
+
+        assert_eq!(state.left_pane.selected_index, 0);
+        assert!(state.left_pane.needs_scroll_to_selected);
+    }
+
+    #[test]
+    fn stale_scroll_offset_updates_do_not_override_pending_selection_scroll() {
+        let mut state = test_state();
+        state.left_pane.scroll_offset = 0.0;
+        state.left_pane.needs_scroll_to_selected = true;
+
+        state.dispatch_action(CommanderAction::UpdatePaneScrollOffset {
+            pane: PaneSide::Left,
+            offset: 500,
+        });
+
+        assert_eq!(state.left_pane.scroll_offset, 0.0);
+        assert!(state.left_pane.needs_scroll_to_selected);
+
+        state.dispatch_action(CommanderAction::PaneScrollToSelectedIssued {
+            pane: PaneSide::Left,
+            offset: 76,
+        });
+
+        assert_eq!(state.left_pane.scroll_offset, 76.0);
+        assert!(!state.left_pane.needs_scroll_to_selected);
     }
 
     #[test]

@@ -70,12 +70,27 @@ fn pane(
             header_row(ui);
             ui.separator();
 
+            let viewport_height = ui.available_height().max(0.0);
+            let row_pitch = ENTRY_ROW_HEIGHT + ui.spacing().item_spacing.y;
+            let scroll_offset = if pane.needs_scroll_to_selected {
+                scroll_offset_to_make_row_visible(
+                    pane.selected_index,
+                    pane.entries.len(),
+                    pane.scroll_offset,
+                    viewport_height,
+                    row_pitch,
+                    ENTRY_ROW_HEIGHT,
+                )
+            } else {
+                pane.scroll_offset
+            };
+
             let output = egui::ScrollArea::vertical()
                 .id_salt(match side {
                     PaneSide::Left => "left_pane_entries",
                     PaneSide::Right => "right_pane_entries",
                 })
-                .vertical_scroll_offset(pane.scroll_offset)
+                .vertical_scroll_offset(scroll_offset)
                 .auto_shrink([false, false])
                 .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
                 .show_rows(ui, ENTRY_ROW_HEIGHT, pane.entries.len(), |ui, row_range| {
@@ -111,10 +126,38 @@ fn pane(
                 });
 
             let offset = output.state.offset.y.round() as i32;
-            if offset != pane.scroll_offset.round() as i32 {
+            if pane.needs_scroll_to_selected {
+                actions.push(CommanderAction::PaneScrollToSelectedIssued { pane: side, offset });
+            } else if offset != pane.scroll_offset.round() as i32 {
                 actions.push(CommanderAction::UpdatePaneScrollOffset { pane: side, offset });
             }
         });
+}
+
+fn scroll_offset_to_make_row_visible(
+    selected_index: usize,
+    entry_count: usize,
+    current_offset: f32,
+    viewport_height: f32,
+    row_pitch: f32,
+    row_height: f32,
+) -> f32 {
+    if entry_count == 0 {
+        return 0.0;
+    }
+
+    let selected_index = selected_index.min(entry_count - 1);
+    let row_top = selected_index as f32 * row_pitch;
+    let row_bottom = row_top + row_height;
+    let viewport_bottom = current_offset + viewport_height;
+
+    if row_top < current_offset {
+        row_top
+    } else if row_bottom > viewport_bottom {
+        (row_bottom - viewport_height).max(0.0)
+    } else {
+        current_offset.max(0.0)
+    }
 }
 
 fn pane_load_state(ui: &mut egui::Ui, load_state: &PaneLoadState) {
@@ -201,4 +244,37 @@ fn left_aligned_label(ui: &mut egui::Ui, width: f32, text: egui::RichText) {
             ui.add(egui::Label::new(text).truncate());
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scroll_offset_to_make_row_visible;
+
+    #[test]
+    fn selected_row_above_viewport_scrolls_up_to_row() {
+        let offset = scroll_offset_to_make_row_visible(2, 20, 300.0, 120.0, 40.0, 38.0);
+
+        assert_eq!(offset, 80.0);
+    }
+
+    #[test]
+    fn selected_row_below_viewport_scrolls_down_just_enough() {
+        let offset = scroll_offset_to_make_row_visible(8, 20, 0.0, 120.0, 40.0, 38.0);
+
+        assert_eq!(offset, 238.0);
+    }
+
+    #[test]
+    fn selected_row_inside_viewport_keeps_current_offset() {
+        let offset = scroll_offset_to_make_row_visible(4, 20, 120.0, 120.0, 40.0, 38.0);
+
+        assert_eq!(offset, 120.0);
+    }
+
+    #[test]
+    fn selected_first_row_with_stale_offset_scrolls_to_top() {
+        let offset = scroll_offset_to_make_row_visible(0, 20, 400.0, 120.0, 40.0, 38.0);
+
+        assert_eq!(offset, 0.0);
+    }
 }

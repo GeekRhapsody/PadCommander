@@ -16,6 +16,7 @@ pub enum CommanderAction {
     GoBack,
     GoParent,
     UpdatePaneScrollOffset { pane: PaneSide, offset: i32 },
+    PaneScrollToSelectedIssued { pane: PaneSide, offset: i32 },
     Refresh,
     ToggleMarkSelected,
     CreateFolder,

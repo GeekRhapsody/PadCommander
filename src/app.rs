@@ -36,14 +36,16 @@ impl eframe::App for HandheldCommanderApp {
         apply_ui_scale(&ctx, self.state.settings.ui_scale);
         self.state.poll_tasks();
 
-        let mut actions = self.input_manager.collect_actions(
+        let actions = self.input_manager.collect_actions(
             &ctx,
             self.state.text_dialog_is_open(),
             self.state.settings_dialog_is_open(),
         );
-        actions.extend(crate::ui::show(ui, &self.state));
-
         for action in actions {
+            self.handle_action(&ctx, action);
+        }
+
+        for action in crate::ui::show(ui, &self.state) {
             self.handle_action(&ctx, action);
         }
 
