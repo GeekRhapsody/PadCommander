@@ -57,8 +57,6 @@ fn pane(
                 ui.label(crate::fs::location_label(&pane.current_location));
                 ui.separator();
                 ui.label(format!("Marked: {}", pane.marked_summary().size_label()));
-                ui.separator();
-                ui.label(format!("Scroll: {:.0}", pane.scroll_offset));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let indicator = if is_active { "ACTIVE" } else { "STANDBY" };
                     ui.label(egui::RichText::new(indicator).color(accent).strong());
@@ -72,6 +70,7 @@ fn pane(
 
             let viewport_height = ui.available_height().max(0.0);
             let row_pitch = ENTRY_ROW_HEIGHT + ui.spacing().item_spacing.y;
+            let row_layout = RowLayout::new(ui);
             let scroll_offset = if pane.needs_scroll_to_selected {
                 scroll_offset_to_make_row_visible(
                     pane.selected_index,
@@ -93,45 +92,101 @@ fn pane(
                 .vertical_scroll_offset(scroll_offset)
                 .auto_shrink([false, false])
                 .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
-                .show_rows(ui, ENTRY_ROW_HEIGHT, pane.entries.len(), |ui, row_range| {
-                    for index in row_range {
-                        let entry = &pane.entries[index];
-                        let selected = is_active && index == pane.selected_index;
-                        let marked = pane.marked_items.contains(&entry.virtual_path);
-                        let disabled = !entry.is_available_source();
-                        let fill = if selected {
-                            egui::Color32::from_rgb(59, 78, 73)
-                        } else if marked {
-                            egui::Color32::from_rgb(58, 52, 35)
-                        } else if disabled {
-                            egui::Color32::from_rgb(28, 30, 31)
-                        } else if index % 2 == 0 {
-                            egui::Color32::from_rgb(38, 42, 43)
-                        } else {
-                            egui::Color32::from_rgb(32, 35, 36)
-                        };
-
-                        let response = egui::Frame::new()
-                            .fill(fill)
-                            .inner_margin(egui::Margin::symmetric(8, 5))
-                            .show(ui, |ui| row_contents(ui, entry, selected, marked, disabled))
-                            .response
-                            .interact(egui::Sense::click())
-                            .on_hover_text(&entry.virtual_path);
-
-                        if response.clicked() {
-                            actions.push(CommanderAction::SelectEntry { pane: side, index });
-                        }
-                    }
+                .show_viewport(ui, |ui, viewport| {
+                    show_visible_rows(ui, pane, is_active, viewport, row_pitch, row_layout);
                 });
 
             let offset = output.state.offset.y.round() as i32;
+            let row_response = ui.interact(
+                output.inner_rect,
+                ui.make_persistent_id(match side {
+                    PaneSide::Left => "left_pane_entry_click_target",
+                    PaneSide::Right => "right_pane_entry_click_target",
+                }),
+                egui::Sense::click(),
+            );
+            if row_response.clicked()
+                && let Some(index) =
+                    clicked_row_index(ui, &row_response, offset, pane.entries.len())
+            {
+                actions.push(CommanderAction::SelectEntry { pane: side, index });
+            }
+
             if pane.needs_scroll_to_selected {
                 actions.push(CommanderAction::PaneScrollToSelectedIssued { pane: side, offset });
             } else if offset != pane.scroll_offset.round() as i32 {
                 actions.push(CommanderAction::UpdatePaneScrollOffset { pane: side, offset });
             }
         });
+}
+
+fn show_visible_rows(
+    ui: &mut egui::Ui,
+    pane: &PaneState,
+    is_active: bool,
+    viewport: egui::Rect,
+    row_pitch: f32,
+    row_layout: RowLayout,
+) {
+    let spacing = ui.spacing().item_spacing;
+    ui.set_height((row_pitch * pane.entries.len() as f32 - spacing.y).max(0.0));
+
+    let mut min_row = (viewport.min.y / row_pitch).floor() as usize;
+    let mut max_row = (viewport.max.y / row_pitch).ceil() as usize + 1;
+    if max_row > pane.entries.len() {
+        let visible_row_count = max_row.saturating_sub(min_row);
+        max_row = pane.entries.len();
+        min_row = pane.entries.len().saturating_sub(visible_row_count);
+    }
+
+    let y_min = ui.max_rect().top() + min_row as f32 * row_pitch;
+    let y_max = ui.max_rect().top() + max_row as f32 * row_pitch;
+    let rect = egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), y_min..=y_max);
+
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+        ui.skip_ahead_auto_ids(min_row);
+        for index in min_row..max_row {
+            let entry = &pane.entries[index];
+            let selected = is_active && index == pane.selected_index;
+            let marked = pane.marked_items.contains(&entry.virtual_path);
+            let disabled = !entry.is_available_source();
+            let fill = if selected {
+                egui::Color32::from_rgb(59, 78, 73)
+            } else if marked {
+                egui::Color32::from_rgb(58, 52, 35)
+            } else if disabled {
+                egui::Color32::from_rgb(28, 30, 31)
+            } else if index % 2 == 0 {
+                egui::Color32::from_rgb(38, 42, 43)
+            } else {
+                egui::Color32::from_rgb(32, 35, 36)
+            };
+
+            paint_entry_row(ui, row_layout, entry, selected, marked, disabled, fill);
+        }
+    });
+}
+
+fn clicked_row_index(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    scroll_offset: i32,
+    entry_count: usize,
+) -> Option<usize> {
+    let click_pos = response.interact_pointer_pos()?;
+    let row_pitch = ENTRY_ROW_HEIGHT + ui.spacing().item_spacing.y;
+    let y_in_content = click_pos.y - response.rect.top() + scroll_offset as f32;
+    if y_in_content < 0.0 {
+        return None;
+    }
+
+    let row_index = (y_in_content / row_pitch).floor() as usize;
+    let y_in_row = y_in_content - row_index as f32 * row_pitch;
+    if row_index < entry_count && y_in_row <= ENTRY_ROW_HEIGHT {
+        Some(row_index)
+    } else {
+        None
+    }
 }
 
 fn scroll_offset_to_make_row_visible(
@@ -188,8 +243,52 @@ fn header_row(ui: &mut egui::Ui) {
     });
 }
 
-fn row_contents(
+fn paint_entry_row(
     ui: &mut egui::Ui,
+    layout: RowLayout,
+    entry: &FileEntry,
+    selected: bool,
+    marked: bool,
+    disabled: bool,
+    fill: egui::Color32,
+) {
+    let row_rect = egui::Rect::from_min_size(
+        ui.cursor().min,
+        egui::vec2(ui.available_width(), ENTRY_ROW_HEIGHT),
+    );
+    ui.painter()
+        .rect_filled(row_rect, egui::CornerRadius::ZERO, fill);
+    paint_row_contents(
+        ui,
+        layout,
+        row_rect.shrink2(egui::vec2(8.0, 5.0)),
+        entry,
+        selected,
+        marked,
+        disabled,
+    );
+    ui.advance_cursor_after_rect(row_rect);
+}
+
+#[derive(Clone, Copy)]
+struct RowLayout {
+    name_width: f32,
+    spacing: f32,
+}
+
+impl RowLayout {
+    fn new(ui: &egui::Ui) -> Self {
+        Self {
+            name_width: name_column_width(ui),
+            spacing: ui.spacing().item_spacing.x,
+        }
+    }
+}
+
+fn paint_row_contents(
+    ui: &mut egui::Ui,
+    layout: RowLayout,
+    content_rect: egui::Rect,
     entry: &FileEntry,
     selected: bool,
     marked: bool,
@@ -208,25 +307,80 @@ fn row_contents(
         ui.visuals().text_color()
     };
 
-    ui.horizontal(|ui| {
-        ui.set_height(28.0);
-        let name_width = name_column_width(ui);
+    let painter = ui.painter();
+    let font_id = egui::TextStyle::Body.resolve(ui.style());
+    let text_y = content_rect.center().y;
 
-        left_aligned_label(ui, name_width, egui::RichText::new(name).color(text_color));
-        ui.add_sized(
-            [TYPE_COLUMN_WIDTH, ROW_HEIGHT],
-            egui::Label::new(egui::RichText::new(entry.kind_label()).color(text_color)).truncate(),
-        );
-        ui.add_sized(
-            [SIZE_COLUMN_WIDTH, ROW_HEIGHT],
-            egui::Label::new(egui::RichText::new(entry.size_label()).color(text_color)).truncate(),
-        );
-        ui.add_sized(
-            [MODIFIED_COLUMN_WIDTH, ROW_HEIGHT],
-            egui::Label::new(egui::RichText::new(entry.modified_label()).color(text_color))
-                .truncate(),
-        );
-    });
+    let mut x = content_rect.left();
+    paint_cell_text(
+        painter,
+        egui::Rect::from_min_size(
+            egui::pos2(x, text_y - ROW_HEIGHT / 2.0),
+            egui::vec2(layout.name_width, ROW_HEIGHT),
+        ),
+        &name,
+        font_id.clone(),
+        text_color,
+        egui::Align2::LEFT_CENTER,
+    );
+    x += layout.name_width + layout.spacing;
+
+    paint_cell_text(
+        painter,
+        egui::Rect::from_min_size(
+            egui::pos2(x, text_y - ROW_HEIGHT / 2.0),
+            egui::vec2(TYPE_COLUMN_WIDTH, ROW_HEIGHT),
+        ),
+        entry.kind_label(),
+        font_id.clone(),
+        text_color,
+        egui::Align2::CENTER_CENTER,
+    );
+    x += TYPE_COLUMN_WIDTH + layout.spacing;
+
+    paint_cell_text(
+        painter,
+        egui::Rect::from_min_size(
+            egui::pos2(x, text_y - ROW_HEIGHT / 2.0),
+            egui::vec2(SIZE_COLUMN_WIDTH, ROW_HEIGHT),
+        ),
+        &entry.size_label(),
+        font_id.clone(),
+        text_color,
+        egui::Align2::RIGHT_CENTER,
+    );
+    x += SIZE_COLUMN_WIDTH + layout.spacing;
+
+    paint_cell_text(
+        painter,
+        egui::Rect::from_min_size(
+            egui::pos2(x, text_y - ROW_HEIGHT / 2.0),
+            egui::vec2(MODIFIED_COLUMN_WIDTH, ROW_HEIGHT),
+        ),
+        &entry.modified_label(),
+        font_id,
+        text_color,
+        egui::Align2::LEFT_CENTER,
+    );
+}
+
+fn paint_cell_text(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    text: &str,
+    font_id: egui::FontId,
+    color: egui::Color32,
+    align: egui::Align2,
+) {
+    let pos = match align {
+        egui::Align2::LEFT_CENTER => rect.left_center(),
+        egui::Align2::CENTER_CENTER => rect.center(),
+        egui::Align2::RIGHT_CENTER => rect.right_center(),
+        _ => rect.left_center(),
+    };
+    painter
+        .with_clip_rect(rect)
+        .text(pos, align, text, font_id, color);
 }
 
 fn name_column_width(ui: &egui::Ui) -> f32 {
