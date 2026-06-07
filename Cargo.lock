@@ -1555,6 +1555,7 @@ dependencies = [
  "chrono",
  "eframe",
  "gilrs",
+ "image",
  "serde",
  "serde_json",
  "windows 0.61.3",
