@@ -238,15 +238,17 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 },
                             );
                             ui.add_space(10.0);
-                            ui.horizontal(|ui| {
-                                if ui.button("Apply").clicked() {
-                                    actions.push(CommanderAction::Confirm);
-                                }
-                                if ui.button("Close").clicked() {
-                                    actions.push(CommanderAction::Cancel);
-                                }
-                            });
-                            ui.label("D-pad/arrow keys choose and change settings. A / Enter applies. B / Esc closes.");
+                            ui.add_space(8.0);
+                            settings_row(
+                                ui,
+                                settings_modal.focused_setting() == SettingsModalFocus::Quit,
+                                |ui| {
+                                    if ui.button("Quit App").clicked() {
+                                        actions.push(CommanderAction::QuitDevelopment);
+                                    }
+                                },
+                            );
+                            ui.label("D-pad/arrow keys choose and change settings. A / Enter toggles. B / Esc closes.");
                         }
                         DialogState::Favourites(favourites) => {
                             ui.heading("Favourites");

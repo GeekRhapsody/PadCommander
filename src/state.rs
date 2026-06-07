@@ -139,7 +139,7 @@ impl AppState {
             CommanderAction::MoveSelectionEnd => self.move_active_selection(SelectionMovement::End),
             CommanderAction::OpenSelected => {
                 if self.dialog != DialogState::None {
-                    self.confirm_dialog();
+                    return self.confirm_dialog();
                 } else {
                     self.open_or_confirm_selected();
                 }
@@ -186,7 +186,7 @@ impl AppState {
                     self.status = "Cancel/back is reserved for navigation history.".to_owned();
                 }
             }
-            CommanderAction::Confirm => self.confirm_dialog(),
+            CommanderAction::Confirm => return self.confirm_dialog(),
             CommanderAction::OpenSettings => {
                 self.dialog = DialogState::Settings(SettingsModalState::default());
                 self.status = "Settings opened.".to_owned();
@@ -527,7 +527,7 @@ impl AppState {
         };
     }
 
-    fn confirm_dialog(&mut self) {
+    fn confirm_dialog(&mut self) -> DispatchResult {
         match &self.dialog {
             DialogState::TextInput(_) => self.handle_text_input(TextInputAction::Submit),
             DialogState::DeleteConfirm(confirm) => {
@@ -541,12 +541,9 @@ impl AppState {
             DialogState::CommandMenu(menu) => {
                 let action = menu.selected_action();
                 self.dialog = DialogState::None;
-                self.dispatch_action(action);
+                return self.dispatch_action(action);
             }
-            DialogState::Settings(_) => {
-                self.dialog = DialogState::None;
-                self.status = "Settings applied.".to_owned();
-            }
+            DialogState::Settings(_) => return self.activate_focused_setting(),
             DialogState::Favourites(_) => self.open_focused_favourite(),
             DialogState::Decompress(decompress) => {
                 let request = decompress.selected_request();
@@ -558,6 +555,8 @@ impl AppState {
             }
             DialogState::None => self.open_or_confirm_selected(),
         }
+
+        DispatchResult::default()
     }
 
     fn apply_text_submission(&mut self, purpose: TextInputPurpose, value: String) {
@@ -1073,7 +1072,40 @@ impl AppState {
                 SettingsModalFocus::UiScale => self.adjust_ui_scale(delta),
                 SettingsModalFocus::UseRecycleBin => self.toggle_use_recycle_bin(),
                 SettingsModalFocus::ShowHiddenFiles => self.toggle_show_hidden_files(),
+                SettingsModalFocus::Quit => {
+                    self.status = "Press A / Enter to quit.".to_owned();
+                }
             }
+        }
+    }
+
+    fn activate_focused_setting(&mut self) -> DispatchResult {
+        let Some(focused_setting) = self.focused_setting() else {
+            return DispatchResult::default();
+        };
+
+        match focused_setting {
+            SettingsModalFocus::UiScale => {
+                self.status = "Use Left / Right to change UI scale.".to_owned();
+            }
+            SettingsModalFocus::UseRecycleBin => self.toggle_use_recycle_bin(),
+            SettingsModalFocus::ShowHiddenFiles => self.toggle_show_hidden_files(),
+            SettingsModalFocus::Quit => {
+                self.status = "Quit requested.".to_owned();
+                return DispatchResult {
+                    quit_requested: true,
+                };
+            }
+        }
+
+        DispatchResult::default()
+    }
+
+    fn focused_setting(&self) -> Option<SettingsModalFocus> {
+        if let DialogState::Settings(settings) = &self.dialog {
+            Some(settings.focused_setting())
+        } else {
+            None
         }
     }
 
@@ -1588,7 +1620,7 @@ pub struct SettingsModalState {
 
 impl SettingsModalState {
     pub fn move_focus(&mut self, movement: SelectionMovement) {
-        const LAST_INDEX: usize = 2;
+        const LAST_INDEX: usize = 3;
 
         self.focused_index = match movement {
             SelectionMovement::Up | SelectionMovement::PageUp => {
@@ -1606,6 +1638,7 @@ impl SettingsModalState {
         match self.focused_index {
             1 => SettingsModalFocus::UseRecycleBin,
             2 => SettingsModalFocus::ShowHiddenFiles,
+            3 => SettingsModalFocus::Quit,
             _ => SettingsModalFocus::UiScale,
         }
     }
@@ -1616,6 +1649,7 @@ pub enum SettingsModalFocus {
     UiScale,
     UseRecycleBin,
     ShowHiddenFiles,
+    Quit,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -2526,6 +2560,35 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["..", "visible", "hidden"]
         );
+    }
+
+    #[test]
+    fn settings_confirm_toggles_focused_boolean_without_closing_modal() {
+        let mut state = test_state();
+
+        state.dispatch_action(CommanderAction::OpenSettings);
+        state.dispatch_action(CommanderAction::MoveSelectionDown);
+
+        assert!(state.settings.use_recycle_bin);
+        let result = state.dispatch_action(CommanderAction::Confirm);
+
+        assert!(!result.quit_requested);
+        assert!(!state.settings.use_recycle_bin);
+        assert!(matches!(state.dialog, DialogState::Settings(_)));
+    }
+
+    #[test]
+    fn settings_confirm_on_quit_row_requests_quit() {
+        let mut state = test_state();
+
+        state.dispatch_action(CommanderAction::OpenSettings);
+        state.dispatch_action(CommanderAction::MoveSelectionDown);
+        state.dispatch_action(CommanderAction::MoveSelectionDown);
+        state.dispatch_action(CommanderAction::MoveSelectionDown);
+        let result = state.dispatch_action(CommanderAction::Confirm);
+
+        assert!(result.quit_requested);
+        assert_eq!(state.status, "Quit requested.");
     }
 
     #[test]
