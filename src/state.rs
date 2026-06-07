@@ -3,7 +3,7 @@ use crate::{
     fs::{self, LocalFileSystem, VirtualFileSystem},
     platform::windows,
     settings::{self, Settings, UI_SCALE_STEP},
-    tasks::{TaskId, TaskKind, TaskManager, TaskStatus},
+    tasks::{DeleteMode, TaskId, TaskKind, TaskManager, TaskStatus},
 };
 
 use std::{
@@ -45,9 +45,15 @@ pub struct AppState {
     pub show_input_help: bool,
     pub local_file_system: LocalFileSystem,
     pub task_manager: TaskManager,
-    pub delete_task_panes: BTreeMap<u64, PaneSide>,
+    pub delete_tasks: BTreeMap<u64, DeleteTaskContext>,
     pub transfer_task_panes: BTreeMap<TaskId, Vec<PaneSide>>,
     pending_shortcut_request: Option<PendingShortcutRequest>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DeleteTaskContext {
+    pub pane: PaneSide,
+    pub mode: DeleteMode,
 }
 
 impl AppState {
@@ -78,7 +84,7 @@ impl AppState {
             show_input_help: false,
             local_file_system,
             task_manager: TaskManager::default(),
-            delete_task_panes: BTreeMap::new(),
+            delete_tasks: BTreeMap::new(),
             transfer_task_panes: BTreeMap::new(),
             pending_shortcut_request: None,
         };
@@ -226,6 +232,21 @@ impl AppState {
                     self.adjust_ui_scale(-UI_SCALE_STEP);
                 }
             }
+            CommanderAction::AdjustFocusedSettingLeft => {
+                if matches!(self.dialog, DialogState::Settings(_)) {
+                    self.adjust_focused_setting(-UI_SCALE_STEP);
+                }
+            }
+            CommanderAction::AdjustFocusedSettingRight => {
+                if matches!(self.dialog, DialogState::Settings(_)) {
+                    self.adjust_focused_setting(UI_SCALE_STEP);
+                }
+            }
+            CommanderAction::ToggleUseRecycleBin => {
+                if matches!(self.dialog, DialogState::Settings(_)) {
+                    self.toggle_use_recycle_bin();
+                }
+            }
             CommanderAction::OpenCommandPalette => {
                 if matches!(self.dialog, DialogState::Favourites(_)) {
                     self.add_active_location_to_favourites();
@@ -282,12 +303,11 @@ impl AppState {
 
     pub fn poll_tasks(&mut self) {
         for completion in self.task_manager.poll_completed() {
-            if let Some(side) = self.delete_task_panes.remove(&completion.id) {
-                self.refresh_pane(side);
+            if let Some(context) = self.delete_tasks.remove(&completion.id) {
+                self.refresh_pane(context.pane);
                 match completion.result {
                     Ok(data) if completion.status == TaskStatus::Succeeded => {
-                        self.status =
-                            format!("Moved {} item(s) to the Recycle Bin.", data.item_count);
+                        self.status = context.mode.success_message(data.item_count);
                     }
                     Err(error) => {
                         self.status = if completion.status == TaskStatus::Cancelled {
@@ -618,11 +638,20 @@ impl AppState {
             .iter()
             .map(|entry| PathBuf::from(&entry.virtual_path))
             .collect();
+        let mode = if self.settings.use_recycle_bin {
+            DeleteMode::RecycleBin
+        } else {
+            DeleteMode::Permanent
+        };
         let label = format!("Deleting {} item(s)", paths.len());
-        let task_id = self
-            .task_manager
-            .spawn_delete_to_recycle_bin(label.clone(), paths);
-        self.delete_task_panes.insert(task_id, confirm.pane);
+        let task_id = self.task_manager.spawn_delete(label.clone(), paths, mode);
+        self.delete_tasks.insert(
+            task_id,
+            DeleteTaskContext {
+                pane: confirm.pane,
+                mode,
+            },
+        );
         self.dialog = DialogState::None;
         self.status = format!("{label} in background.");
     }
@@ -1032,9 +1061,30 @@ impl AppState {
         }
     }
 
+    fn adjust_focused_setting(&mut self, delta: f32) {
+        if let DialogState::Settings(settings) = &self.dialog
+            && settings.focused_setting() == SettingsModalFocus::UseRecycleBin
+        {
+            self.toggle_use_recycle_bin();
+            return;
+        }
+
+        self.adjust_ui_scale(delta);
+    }
+
     fn adjust_ui_scale(&mut self, delta: f32) {
         self.settings.ui_scale = settings::clamp_ui_scale(self.settings.ui_scale + delta);
         self.persist_settings("UI scale updated.");
+    }
+
+    fn toggle_use_recycle_bin(&mut self) {
+        self.settings.use_recycle_bin = !self.settings.use_recycle_bin;
+        let status = if self.settings.use_recycle_bin {
+            "Delete will use the Recycle Bin."
+        } else {
+            "Delete will permanently remove files."
+        };
+        self.persist_settings(status);
     }
 
     fn add_active_location_to_favourites(&mut self) {
@@ -1521,15 +1571,32 @@ pub struct SettingsModalState {
 
 impl SettingsModalState {
     pub fn move_focus(&mut self, movement: SelectionMovement) {
+        const LAST_INDEX: usize = 1;
+
         self.focused_index = match movement {
-            SelectionMovement::Up
-            | SelectionMovement::PageUp
-            | SelectionMovement::Home
-            | SelectionMovement::Down
-            | SelectionMovement::PageDown
-            | SelectionMovement::End => 0,
+            SelectionMovement::Up | SelectionMovement::PageUp => {
+                self.focused_index.saturating_sub(1)
+            }
+            SelectionMovement::Down | SelectionMovement::PageDown => {
+                (self.focused_index + 1).min(LAST_INDEX)
+            }
+            SelectionMovement::Home => 0,
+            SelectionMovement::End => LAST_INDEX,
         };
     }
+
+    pub fn focused_setting(&self) -> SettingsModalFocus {
+        match self.focused_index {
+            1 => SettingsModalFocus::UseRecycleBin,
+            _ => SettingsModalFocus::UiScale,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SettingsModalFocus {
+    UiScale,
+    UseRecycleBin,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -2364,7 +2431,7 @@ mod tests {
             show_input_help: false,
             local_file_system: LocalFileSystem,
             task_manager: TaskManager::default(),
-            delete_task_panes: BTreeMap::new(),
+            delete_tasks: BTreeMap::new(),
             transfer_task_panes: BTreeMap::new(),
             pending_shortcut_request: None,
         }
@@ -2761,7 +2828,7 @@ mod tests {
     fn wait_for_state_tasks(state: &mut AppState) {
         for _ in 0..100 {
             state.poll_tasks();
-            if state.transfer_task_panes.is_empty() && state.delete_task_panes.is_empty() {
+            if state.transfer_task_panes.is_empty() && state.delete_tasks.is_empty() {
                 return;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));

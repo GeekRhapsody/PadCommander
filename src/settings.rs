@@ -11,6 +11,8 @@ pub const UI_SCALE_STEP: f32 = 0.1;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
     pub ui_scale: f32,
+    #[serde(default = "default_use_recycle_bin")]
+    pub use_recycle_bin: bool,
     #[serde(default)]
     pub favourites: Vec<String>,
     #[serde(default)]
@@ -23,6 +25,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             ui_scale: 1.0,
+            use_recycle_bin: true,
             favourites: Vec::new(),
             last_left_pane_location: None,
             last_right_pane_location: None,
@@ -37,6 +40,10 @@ impl Settings {
         self.favourites.dedup();
         self
     }
+}
+
+fn default_use_recycle_bin() -> bool {
+    true
 }
 
 pub fn clamp_ui_scale(ui_scale: f32) -> f32 {
@@ -90,6 +97,7 @@ mod tests {
     fn settings_round_trip_serializes_all_persistent_fields() {
         let settings = Settings {
             ui_scale: 1.4,
+            use_recycle_bin: false,
             favourites: vec!["C:\\Games".to_owned(), "D:\\Downloads".to_owned()],
             last_left_pane_location: Some("C:\\Users".to_owned()),
             last_right_pane_location: Some("D:\\".to_owned()),
@@ -107,6 +115,7 @@ mod tests {
             serde_json::from_str(r#"{"ui_scale":1.25}"#).expect("deserialize old settings");
 
         assert_eq!(settings.ui_scale, 1.25);
+        assert!(settings.use_recycle_bin);
         assert!(settings.favourites.is_empty());
         assert_eq!(settings.last_left_pane_location, None);
         assert_eq!(settings.last_right_pane_location, None);
@@ -116,6 +125,7 @@ mod tests {
     fn sanitize_clamps_scale_and_deduplicates_favourites() {
         let settings = Settings {
             ui_scale: 99.0,
+            use_recycle_bin: true,
             favourites: vec!["B".to_owned(), "A".to_owned(), "A".to_owned()],
             last_left_pane_location: None,
             last_right_pane_location: None,

@@ -369,9 +369,9 @@ impl TaskManager {
         id
     }
 
-    pub fn spawn_delete_to_recycle_bin(&mut self, label: String, paths: Vec<PathBuf>) -> TaskId {
+    pub fn spawn_delete(&mut self, label: String, paths: Vec<PathBuf>, mode: DeleteMode) -> TaskId {
         self.spawn_threaded(TaskKind::Delete, label, true, move |reporter| {
-            delete_to_recycle_bin_task(reporter, paths)
+            delete_task(reporter, paths, mode)
         })
     }
 
@@ -652,7 +652,29 @@ enum TaskEvent {
     },
 }
 
-fn delete_to_recycle_bin_task(reporter: TaskReporter, paths: Vec<PathBuf>) -> TaskOutcome {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeleteMode {
+    RecycleBin,
+    Permanent,
+}
+
+impl DeleteMode {
+    pub fn success_message(self, item_count: usize) -> String {
+        match self {
+            DeleteMode::RecycleBin => format!("Moved {item_count} item(s) to the Recycle Bin."),
+            DeleteMode::Permanent => format!("Permanently deleted {item_count} item(s)."),
+        }
+    }
+
+    fn ready_label(self) -> &'static str {
+        match self {
+            DeleteMode::RecycleBin => "Ready to move to Recycle Bin",
+            DeleteMode::Permanent => "Ready to permanently delete",
+        }
+    }
+}
+
+fn delete_task(reporter: TaskReporter, paths: Vec<PathBuf>, mode: DeleteMode) -> TaskOutcome {
     if paths.is_empty() {
         return TaskOutcome::Failed("No items selected for deletion.".to_owned());
     }
@@ -678,7 +700,7 @@ fn delete_to_recycle_bin_task(reporter: TaskReporter, paths: Vec<PathBuf>) -> Ta
     let selected_count = plan.roots.len();
 
     reporter.progress(ProgressSnapshot {
-        current_file: Some("Ready to delete".to_owned()),
+        current_file: Some(mode.ready_label().to_owned()),
         bytes_done,
         total_bytes: plan.total_bytes,
         items_done,
@@ -698,9 +720,16 @@ fn delete_to_recycle_bin_task(reporter: TaskReporter, paths: Vec<PathBuf>) -> Ta
             total_items: plan.total_items,
         });
 
-        if let Err(error) =
-            commander_fs::delete_paths_to_recycle_bin(std::slice::from_ref(&root.path))
-        {
+        let delete_result = match mode {
+            DeleteMode::RecycleBin => {
+                commander_fs::delete_paths_to_recycle_bin(std::slice::from_ref(&root.path))
+            }
+            DeleteMode::Permanent => {
+                commander_fs::delete_paths_permanently(std::slice::from_ref(&root.path))
+            }
+        };
+
+        if let Err(error) = delete_result {
             return TaskOutcome::Failed(error.user_message());
         }
 

@@ -365,6 +365,39 @@ pub fn delete_paths_to_recycle_bin(paths: &[PathBuf]) -> Result<(), VfsError> {
     windows::delete_to_recycle_bin(paths).map_err(|message| VfsError::Delete { message })
 }
 
+pub fn delete_paths_permanently(paths: &[PathBuf]) -> Result<(), VfsError> {
+    if paths.is_empty() {
+        return Err(VfsError::InvalidOperation {
+            message: "No items selected for deletion.".to_owned(),
+        });
+    }
+
+    for path in paths {
+        delete_path_permanently(path)?;
+    }
+
+    Ok(())
+}
+
+fn delete_path_permanently(path: &Path) -> Result<(), VfsError> {
+    let metadata = fs::symlink_metadata(path).map_err(|source| VfsError::Delete {
+        message: format!(
+            "Cannot inspect {} before deleting: {source}",
+            path.display()
+        ),
+    })?;
+
+    if metadata.is_dir() {
+        fs::remove_dir_all(path).map_err(|source| VfsError::Delete {
+            message: format!("Cannot permanently delete {}: {source}", path.display()),
+        })
+    } else {
+        fs::remove_file(path).map_err(|source| VfsError::Delete {
+            message: format!("Cannot permanently delete {}: {source}", path.display()),
+        })
+    }
+}
+
 pub fn modified_label(modified: Option<SystemTime>) -> String {
     let Some(modified) = modified else {
         return "-".to_owned();

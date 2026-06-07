@@ -142,11 +142,11 @@ impl KeyboardInputManager {
             }
 
             if settings_active && input.key_pressed(egui::Key::ArrowLeft) {
-                actions.push(CommanderAction::DecreaseUiScale);
+                actions.push(CommanderAction::AdjustFocusedSettingLeft);
             }
 
             if settings_active && input.key_pressed(egui::Key::ArrowRight) {
-                actions.push(CommanderAction::IncreaseUiScale);
+                actions.push(CommanderAction::AdjustFocusedSettingRight);
             }
 
             if input.key_pressed(egui::Key::Escape) {
@@ -329,12 +329,12 @@ impl GamepadInputManager {
             actions.extend(self.dpad_left.update(
                 self.dpad_left_held,
                 now,
-                CommanderAction::DecreaseUiScale,
+                CommanderAction::AdjustFocusedSettingLeft,
             ));
             actions.extend(self.dpad_right.update(
                 self.dpad_right_held,
                 now,
-                CommanderAction::IncreaseUiScale,
+                CommanderAction::AdjustFocusedSettingRight,
             ));
             actions.extend(self.dpad_up.update(
                 self.dpad_up_held,
@@ -391,8 +391,8 @@ fn action_for_button(
 
     if settings_active {
         return match button {
-            Button::DPadLeft => Some(CommanderAction::DecreaseUiScale),
-            Button::DPadRight => Some(CommanderAction::IncreaseUiScale),
+            Button::DPadLeft => Some(CommanderAction::AdjustFocusedSettingLeft),
+            Button::DPadRight => Some(CommanderAction::AdjustFocusedSettingRight),
             Button::South | Button::Start => Some(CommanderAction::Confirm),
             Button::East => Some(CommanderAction::Cancel),
             _ => None,

@@ -9,7 +9,7 @@ use crate::{
     action::CommanderAction,
     app::APP_TITLE,
     settings,
-    state::{AppState, DialogState},
+    state::{AppState, DialogState, SettingsModalFocus},
 };
 
 pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<CommanderAction> {
@@ -110,11 +110,19 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                             ui.label(message);
                         }
                         DialogState::DeleteConfirm(confirm) => {
-                            ui.heading("Delete to Recycle Bin");
-                            ui.label(format!(
-                                "Move {} item(s) to the Recycle Bin?",
-                                confirm.item_count()
-                            ));
+                            if state.settings.use_recycle_bin {
+                                ui.heading("Delete to Recycle Bin");
+                                ui.label(format!(
+                                    "Move {} item(s) to the Recycle Bin?",
+                                    confirm.item_count()
+                                ));
+                            } else {
+                                ui.heading("Permanently Delete");
+                                ui.label(format!(
+                                    "Permanently delete {} item(s)?",
+                                    confirm.item_count()
+                                ));
+                            }
                             ui.label(format!("Examples: {}", confirm.examples()));
                             ui.add_space(10.0);
                             ui.horizontal(|ui| {
@@ -166,26 +174,49 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                             ui.add_space(8.0);
                             ui.label("D-pad/arrow keys move. A / Enter selects. B / Esc cancels.");
                         }
-                        DialogState::Settings(_) => {
+                        DialogState::Settings(settings_modal) => {
                             ui.heading("Settings");
                             ui.add_space(8.0);
-                            ui.horizontal(|ui| {
-                                ui.strong("UI scale");
-                                ui.add_space(18.0);
-                                if ui.button("-").clicked() {
-                                    actions.push(CommanderAction::DecreaseUiScale);
-                                }
-                                ui.label(format!("{:.1}", state.settings.ui_scale));
-                                if ui.button("+").clicked() {
-                                    actions.push(CommanderAction::IncreaseUiScale);
-                                }
-                            });
+                            settings_row(
+                                ui,
+                                settings_modal.focused_setting() == SettingsModalFocus::UiScale,
+                                |ui| {
+                                    ui.strong("UI scale");
+                                    ui.add_space(18.0);
+                                    if ui.button("-").clicked() {
+                                        actions.push(CommanderAction::DecreaseUiScale);
+                                    }
+                                    ui.label(format!("{:.1}", state.settings.ui_scale));
+                                    if ui.button("+").clicked() {
+                                        actions.push(CommanderAction::IncreaseUiScale);
+                                    }
+                                },
+                            );
                             ui.add(
                                 egui::ProgressBar::new(
                                     (state.settings.ui_scale - settings::MIN_UI_SCALE)
                                         / (settings::MAX_UI_SCALE - settings::MIN_UI_SCALE),
                                 )
                                 .desired_width(260.0),
+                            );
+                            ui.add_space(10.0);
+                            settings_row(
+                                ui,
+                                settings_modal.focused_setting()
+                                    == SettingsModalFocus::UseRecycleBin,
+                                |ui| {
+                                    ui.strong("Use Recycle Bin");
+                                    ui.add_space(18.0);
+                                    let mut use_recycle_bin = state.settings.use_recycle_bin;
+                                    if ui.checkbox(&mut use_recycle_bin, "").clicked() {
+                                        actions.push(CommanderAction::ToggleUseRecycleBin);
+                                    }
+                                    ui.label(if state.settings.use_recycle_bin {
+                                        "Enabled"
+                                    } else {
+                                        "Disabled"
+                                    });
+                                },
                             );
                             ui.add_space(10.0);
                             ui.horizontal(|ui| {
@@ -196,7 +227,7 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                     actions.push(CommanderAction::Cancel);
                                 }
                             });
-                            ui.label("Left / Right changes scale. A / Enter applies. B / Esc closes.");
+                            ui.label("D-pad/arrow keys choose and change settings. A / Enter applies. B / Esc closes.");
                         }
                         DialogState::Favourites(favourites) => {
                             ui.heading("Favourites");
@@ -343,6 +374,21 @@ fn mapping_grid(ui: &mut egui::Ui) {
             mapping_row(ui, "Text modal confirm", "Enter", "Start");
             mapping_row(ui, "Quit development", "Ctrl+Q", "none");
         });
+}
+
+fn settings_row(ui: &mut egui::Ui, focused: bool, add_contents: impl FnOnce(&mut egui::Ui)) {
+    let frame = if focused {
+        egui::Frame::new()
+            .fill(egui::Color32::from_rgb(73, 104, 94))
+            .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE))
+            .inner_margin(egui::Margin::same(6))
+    } else {
+        egui::Frame::new().inner_margin(egui::Margin::same(6))
+    };
+
+    frame.show(ui, |ui| {
+        ui.horizontal(add_contents);
+    });
 }
 
 fn mapping_row(ui: &mut egui::Ui, action: &str, keyboard: &str, gamepad: &str) {
