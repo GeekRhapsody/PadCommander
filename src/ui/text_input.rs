@@ -22,7 +22,7 @@ pub fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<CommanderAc
     );
 
     egui::Area::new(egui::Id::new("text_input_dialog"))
-        .order(egui::Order::Foreground)
+        .order(egui::Order::Tooltip)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ctx, |ui| {
             egui::Frame::new()

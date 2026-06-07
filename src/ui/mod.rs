@@ -92,7 +92,7 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
     );
 
     egui::Area::new(egui::Id::new("modal_overlay_area"))
-        .order(egui::Order::Foreground)
+        .order(egui::Order::Tooltip)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ctx, |ui| {
             egui::Frame::new()
@@ -285,7 +285,7 @@ fn input_help_overlay(ctx: &egui::Context, state: &AppState) {
     );
 
     egui::Area::new(egui::Id::new("input_help_overlay"))
-        .order(egui::Order::Foreground)
+        .order(egui::Order::Tooltip)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ctx, |ui| {
             egui::Frame::new()
