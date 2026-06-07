@@ -4,7 +4,7 @@
 
 Manual Windows test:
 
-1. Open Handheld Commander on Windows.
+1. Open PadCommander on Windows.
 2. Navigate one pane to a folder containing an `.exe` file.
 3. Navigate the other pane to a writable folder.
 4. Select the `.exe` file and invoke `Shortcut`.

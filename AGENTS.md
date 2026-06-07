@@ -1,8 +1,8 @@
-# Handheld Commander Agent Guide
+# PadCommander Agent Guide
 
 ## Project Goal
 
-Handheld Commander is a Windows-only Rust full-screen graphical two-pane file manager inspired by Total Commander and Double Commander. It must be gamepad-first while remaining fully usable by keyboard.
+PadCommander is a Windows-only Rust full-screen graphical two-pane file manager inspired by Total Commander and Double Commander. It must be gamepad-first while remaining fully usable by keyboard.
 
 ## Non-Negotiable Product Requirements
 

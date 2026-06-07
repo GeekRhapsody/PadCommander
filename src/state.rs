@@ -2476,7 +2476,7 @@ mod tests {
     fn test_state() -> AppState {
         AppState {
             settings: Settings::default(),
-            settings_path: std::env::temp_dir().join("handheld_commander_test_settings.json"),
+            settings_path: std::env::temp_dir().join("pad_commander_test_settings.json"),
             left_pane: PaneState {
                 title: "Left".to_owned(),
                 current_location: fs::ROOTS_LOCATION.to_owned(),
@@ -2961,7 +2961,7 @@ mod tests {
             .expect("system time should be after epoch")
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "handheld_commander_state_test_{timestamp}_{}",
+            "pad_commander_state_test_{timestamp}_{}",
             std::process::id()
         ))
     }

@@ -1,6 +1,6 @@
-# Build Handheld Commander on Windows
+# Build PadCommander on Windows
 
-Handheld Commander is a Windows-only Rust desktop app. These instructions cover local debug builds, local runs, release builds, and the manual smoke test expected before sharing a binary.
+PadCommander is a Windows-only Rust desktop app. These instructions cover local debug builds, local runs, release builds, and the manual smoke test expected before sharing a binary.
 
 ## Required Tools
 
@@ -33,7 +33,7 @@ cargo build --release
 The release binary is written to:
 
 ```text
-target\release\handheld-commander.exe
+target\release\pad-commander.exe
 ```
 
 The executable includes the Windows app icon from `assets\windows\app.ico`.

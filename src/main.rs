@@ -11,7 +11,7 @@ mod state;
 mod tasks;
 mod ui;
 
-use app::{APP_TITLE, HandheldCommanderApp};
+use app::{APP_TITLE, PadCommanderApp};
 
 fn main() -> eframe::Result {
     let native_options = platform::windows::native_options(APP_TITLE);
@@ -19,6 +19,6 @@ fn main() -> eframe::Result {
     eframe::run_native(
         APP_TITLE,
         native_options,
-        Box::new(|cc| Ok(Box::new(HandheldCommanderApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(PadCommanderApp::new(cc)))),
     )
 }

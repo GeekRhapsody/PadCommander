@@ -5,9 +5,9 @@ fn main() {
     {
         let mut resource = winresource::WindowsResource::new();
         resource.set_icon("assets/windows/app.ico");
-        resource.set("FileDescription", "Handheld Commander");
-        resource.set("ProductName", "Handheld Commander");
-        resource.set("OriginalFilename", "handheld-commander.exe");
+        resource.set("FileDescription", "PadCommander");
+        resource.set("ProductName", "PadCommander");
+        resource.set("OriginalFilename", "pad-commander.exe");
 
         if let Err(error) = resource.compile() {
             panic!("failed to compile Windows application resources: {error}");

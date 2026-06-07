@@ -1427,7 +1427,7 @@ mod tests {
             .expect("system time should be after epoch")
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "handheld_commander_task_test_{timestamp}_{}",
+            "pad_commander_task_test_{timestamp}_{}",
             std::process::id()
         ))
     }

@@ -2,14 +2,14 @@ use eframe::egui;
 
 use crate::{action::CommanderAction, input, state::AppState};
 
-pub const APP_TITLE: &str = "Handheld Commander";
+pub const APP_TITLE: &str = "PadCommander";
 
-pub struct HandheldCommanderApp {
+pub struct PadCommanderApp {
     state: AppState,
     input_manager: input::InputManager,
 }
 
-impl HandheldCommanderApp {
+impl PadCommanderApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let state = AppState::new();
         apply_ui_scale(&cc.egui_ctx, state.settings.ui_scale);
@@ -30,7 +30,7 @@ impl HandheldCommanderApp {
     }
 }
 
-impl eframe::App for HandheldCommanderApp {
+impl eframe::App for PadCommanderApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         apply_ui_scale(&ctx, self.state.settings.ui_scale);

@@ -1,6 +1,6 @@
-# Handheld Commander Architecture
+# PadCommander Architecture
 
-Handheld Commander is planned as a Windows-only Rust full-screen graphical two-pane file manager built with `eframe`/`egui`.
+PadCommander is planned as a Windows-only Rust full-screen graphical two-pane file manager built with `eframe`/`egui`.
 
 ## Planned Module Layout
 
