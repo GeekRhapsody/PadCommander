@@ -46,6 +46,7 @@ pub enum CommanderAction {
     AdjustFocusedSettingLeft,
     AdjustFocusedSettingRight,
     ToggleUseRecycleBin,
+    ToggleShowHiddenFiles,
     OpenCommandPalette,
     OpenSettings,
     ToggleInputHelp,

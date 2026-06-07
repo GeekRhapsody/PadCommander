@@ -14,6 +14,8 @@ pub struct Settings {
     #[serde(default = "default_use_recycle_bin")]
     pub use_recycle_bin: bool,
     #[serde(default)]
+    pub show_hidden_files: bool,
+    #[serde(default)]
     pub favourites: Vec<String>,
     #[serde(default)]
     pub last_left_pane_location: Option<String>,
@@ -26,6 +28,7 @@ impl Default for Settings {
         Self {
             ui_scale: 1.0,
             use_recycle_bin: true,
+            show_hidden_files: false,
             favourites: Vec::new(),
             last_left_pane_location: None,
             last_right_pane_location: None,
@@ -98,6 +101,7 @@ mod tests {
         let settings = Settings {
             ui_scale: 1.4,
             use_recycle_bin: false,
+            show_hidden_files: true,
             favourites: vec!["C:\\Games".to_owned(), "D:\\Downloads".to_owned()],
             last_left_pane_location: Some("C:\\Users".to_owned()),
             last_right_pane_location: Some("D:\\".to_owned()),
@@ -116,6 +120,7 @@ mod tests {
 
         assert_eq!(settings.ui_scale, 1.25);
         assert!(settings.use_recycle_bin);
+        assert!(!settings.show_hidden_files);
         assert!(settings.favourites.is_empty());
         assert_eq!(settings.last_left_pane_location, None);
         assert_eq!(settings.last_right_pane_location, None);
@@ -126,6 +131,7 @@ mod tests {
         let settings = Settings {
             ui_scale: 99.0,
             use_recycle_bin: true,
+            show_hidden_files: false,
             favourites: vec!["B".to_owned(), "A".to_owned(), "A".to_owned()],
             last_left_pane_location: None,
             last_right_pane_location: None,

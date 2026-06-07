@@ -247,6 +247,11 @@ impl AppState {
                     self.toggle_use_recycle_bin();
                 }
             }
+            CommanderAction::ToggleShowHiddenFiles => {
+                if matches!(self.dialog, DialogState::Settings(_)) {
+                    self.toggle_show_hidden_files();
+                }
+            }
             CommanderAction::OpenCommandPalette => {
                 if matches!(self.dialog, DialogState::Favourites(_)) {
                     self.add_active_location_to_favourites();
@@ -1004,11 +1009,12 @@ impl AppState {
             .selected_entry()
             .map(|entry| entry.virtual_path.clone());
         let result = self.local_file_system.list_location(&location);
+        let show_hidden_files = self.settings.show_hidden_files;
         let pane = self.pane_mut(side);
 
         match result {
             Ok(entries) => {
-                pane.entries = entries;
+                pane.entries = filter_hidden_entries(entries, show_hidden_files);
                 pane.retain_valid_marks();
                 pane.restore_selection(previous_selection_path.as_deref());
                 pane.load_state = PaneLoadState::Ready;
@@ -1062,14 +1068,13 @@ impl AppState {
     }
 
     fn adjust_focused_setting(&mut self, delta: f32) {
-        if let DialogState::Settings(settings) = &self.dialog
-            && settings.focused_setting() == SettingsModalFocus::UseRecycleBin
-        {
-            self.toggle_use_recycle_bin();
-            return;
+        if let DialogState::Settings(settings) = &self.dialog {
+            match settings.focused_setting() {
+                SettingsModalFocus::UiScale => self.adjust_ui_scale(delta),
+                SettingsModalFocus::UseRecycleBin => self.toggle_use_recycle_bin(),
+                SettingsModalFocus::ShowHiddenFiles => self.toggle_show_hidden_files(),
+            }
         }
-
-        self.adjust_ui_scale(delta);
     }
 
     fn adjust_ui_scale(&mut self, delta: f32) {
@@ -1084,6 +1089,18 @@ impl AppState {
         } else {
             "Delete will permanently remove files."
         };
+        self.persist_settings(status);
+    }
+
+    fn toggle_show_hidden_files(&mut self) {
+        self.settings.show_hidden_files = !self.settings.show_hidden_files;
+        let status = if self.settings.show_hidden_files {
+            "Hidden files are visible."
+        } else {
+            "Hidden files are hidden."
+        };
+        self.refresh_pane(PaneSide::Left);
+        self.refresh_pane(PaneSide::Right);
         self.persist_settings(status);
     }
 
@@ -1571,7 +1588,7 @@ pub struct SettingsModalState {
 
 impl SettingsModalState {
     pub fn move_focus(&mut self, movement: SelectionMovement) {
-        const LAST_INDEX: usize = 1;
+        const LAST_INDEX: usize = 2;
 
         self.focused_index = match movement {
             SelectionMovement::Up | SelectionMovement::PageUp => {
@@ -1588,6 +1605,7 @@ impl SettingsModalState {
     pub fn focused_setting(&self) -> SettingsModalFocus {
         match self.focused_index {
             1 => SettingsModalFocus::UseRecycleBin,
+            2 => SettingsModalFocus::ShowHiddenFiles,
             _ => SettingsModalFocus::UiScale,
         }
     }
@@ -1597,6 +1615,7 @@ impl SettingsModalState {
 pub enum SettingsModalFocus {
     UiScale,
     UseRecycleBin,
+    ShowHiddenFiles,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -2378,6 +2397,17 @@ fn char_to_byte_index(value: &str, char_index: usize) -> usize {
         .unwrap_or(value.len())
 }
 
+fn filter_hidden_entries(entries: Vec<FileEntry>, show_hidden_files: bool) -> Vec<FileEntry> {
+    if show_hidden_files {
+        return entries;
+    }
+
+    entries
+        .into_iter()
+        .filter(|entry| matches!(entry.kind, FileEntryKind::Parent) || !entry.flags.hidden)
+        .collect()
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct DispatchResult {
     pub quit_requested: bool,
@@ -2396,6 +2426,16 @@ mod tests {
             size: Some(1024),
             modified: None,
             flags: FileEntryFlags::default(),
+        }
+    }
+
+    fn hidden_test_entry(name: &str) -> FileEntry {
+        FileEntry {
+            flags: FileEntryFlags {
+                hidden: true,
+                read_only: false,
+            },
+            ..test_entry(name)
         }
     }
 
@@ -2448,6 +2488,44 @@ mod tests {
 
         state.dispatch_action(CommanderAction::SwitchPane);
         assert_eq!(state.active_pane, PaneSide::Left);
+    }
+
+    #[test]
+    fn hidden_entries_are_filtered_unless_setting_is_enabled() {
+        let parent = FileEntry {
+            display_name: "..".to_owned(),
+            virtual_path: fs::ROOTS_LOCATION.to_owned(),
+            kind: FileEntryKind::Parent,
+            size: None,
+            modified: None,
+            flags: FileEntryFlags {
+                hidden: true,
+                read_only: false,
+            },
+        };
+        let entries = vec![
+            parent.clone(),
+            test_entry("visible"),
+            hidden_test_entry("hidden"),
+        ];
+
+        let hidden_filtered = filter_hidden_entries(entries.clone(), false);
+        assert_eq!(
+            hidden_filtered
+                .iter()
+                .map(|entry| entry.display_name.as_str())
+                .collect::<Vec<_>>(),
+            ["..", "visible"]
+        );
+
+        let hidden_visible = filter_hidden_entries(entries, true);
+        assert_eq!(
+            hidden_visible
+                .iter()
+                .map(|entry| entry.display_name.as_str())
+                .collect::<Vec<_>>(),
+            ["..", "visible", "hidden"]
+        );
     }
 
     #[test]

@@ -219,6 +219,25 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 },
                             );
                             ui.add_space(10.0);
+                            settings_row(
+                                ui,
+                                settings_modal.focused_setting()
+                                    == SettingsModalFocus::ShowHiddenFiles,
+                                |ui| {
+                                    ui.strong("Show Hidden Files");
+                                    ui.add_space(18.0);
+                                    let mut show_hidden_files = state.settings.show_hidden_files;
+                                    if ui.checkbox(&mut show_hidden_files, "").clicked() {
+                                        actions.push(CommanderAction::ToggleShowHiddenFiles);
+                                    }
+                                    ui.label(if state.settings.show_hidden_files {
+                                        "Yes"
+                                    } else {
+                                        "No"
+                                    });
+                                },
+                            );
+                            ui.add_space(10.0);
                             ui.horizontal(|ui| {
                                 if ui.button("Apply").clicked() {
                                     actions.push(CommanderAction::Confirm);
