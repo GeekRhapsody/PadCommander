@@ -351,16 +351,56 @@ fn paint_row_contents(
     );
     x += SIZE_COLUMN_WIDTH + layout.spacing;
 
-    paint_cell_text(
+    paint_modified_cell_text(
         painter,
         egui::Rect::from_min_size(
-            egui::pos2(x, text_y - ROW_HEIGHT / 2.0),
-            egui::vec2(MODIFIED_COLUMN_WIDTH, ROW_HEIGHT),
+            egui::pos2(x, content_rect.top()),
+            egui::vec2(MODIFIED_COLUMN_WIDTH, content_rect.height()),
         ),
         &entry.modified_label(),
         font_id,
         text_color,
+    );
+}
+
+fn paint_modified_cell_text(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    text: &str,
+    font_id: egui::FontId,
+    color: egui::Color32,
+) {
+    let Some((date, time)) = text.split_once(' ') else {
+        paint_cell_text(
+            painter,
+            rect,
+            text,
+            font_id,
+            color,
+            egui::Align2::LEFT_CENTER,
+        );
+        return;
+    };
+
+    let line_gap = 1.0;
+    let line_height = font_id.size;
+    let first_line_y = rect.center().y - (line_height + line_gap) / 2.0;
+    let second_line_y = rect.center().y + (line_height + line_gap) / 2.0;
+    let clipped_painter = painter.with_clip_rect(rect);
+
+    clipped_painter.text(
+        egui::pos2(rect.left(), first_line_y),
         egui::Align2::LEFT_CENTER,
+        date,
+        font_id.clone(),
+        color,
+    );
+    clipped_painter.text(
+        egui::pos2(rect.left(), second_line_y),
+        egui::Align2::LEFT_CENTER,
+        time,
+        font_id,
+        color,
     );
 }
 
