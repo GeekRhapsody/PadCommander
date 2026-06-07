@@ -1687,8 +1687,6 @@ impl CommandMenuState {
             CommandMenuEntry::new("Decompress", CommanderAction::DecompressToOtherPane),
             CommandMenuEntry::new("Rename", CommanderAction::Rename),
             CommandMenuEntry::new("Delete", CommanderAction::Delete),
-            CommandMenuEntry::new("Task Demo", CommanderAction::StartDemoTask),
-            CommandMenuEntry::new("Failing Task Demo", CommanderAction::StartFailingDemoTask),
             CommandMenuEntry::new("Cancel Task", CommanderAction::CancelActiveTask),
         ]);
 
