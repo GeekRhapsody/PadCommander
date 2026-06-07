@@ -47,6 +47,7 @@ pub struct AppState {
     pub task_manager: TaskManager,
     pub delete_task_panes: BTreeMap<u64, PaneSide>,
     pub transfer_task_panes: BTreeMap<TaskId, Vec<PaneSide>>,
+    pending_shortcut_request: Option<PendingShortcutRequest>,
 }
 
 impl AppState {
@@ -79,6 +80,7 @@ impl AppState {
             task_manager: TaskManager::default(),
             delete_task_panes: BTreeMap::new(),
             transfer_task_panes: BTreeMap::new(),
+            pending_shortcut_request: None,
         };
 
         state.refresh_pane(PaneSide::Left);
@@ -446,6 +448,7 @@ impl AppState {
                 initial_value,
             } => self.begin_text_input(purpose, initial_value),
             TextInputAction::Cancel => {
+                self.clear_pending_text_input_state();
                 self.dialog = DialogState::None;
                 self.status = "Text input cancelled.".to_owned();
             }
@@ -460,6 +463,7 @@ impl AppState {
                         self.status = "Editing text.".to_owned();
                     }
                     TextInputOutcome::Cancelled => {
+                        self.clear_pending_text_input_state();
                         self.dialog = DialogState::None;
                         self.status = "Text input cancelled.".to_owned();
                     }
@@ -577,6 +581,10 @@ impl AppState {
                 self.status = "Use Decompress to choose an extraction destination.".to_owned();
                 return;
             }
+            TextInputPurpose::ShortcutName => {
+                self.submit_shortcut_name(value);
+                return;
+            }
         };
 
         match result {
@@ -620,19 +628,16 @@ impl AppState {
     }
 
     fn begin_create_shortcut_in_other_pane(&mut self) {
-        let Some(request) = self.create_shortcut_request() else {
+        let Some(request) = self.create_pending_shortcut_request() else {
             return;
         };
 
-        if request.shortcut_path.exists() {
-            self.dialog = DialogState::ShortcutConflict(ShortcutConflictState { request });
-            self.status = "Shortcut already exists.".to_owned();
-        } else {
-            self.start_create_shortcut(request, false);
-        }
+        let default_name = request.default_shortcut_name();
+        self.pending_shortcut_request = Some(request);
+        self.begin_text_input(TextInputPurpose::ShortcutName, default_name);
     }
 
-    fn create_shortcut_request(&mut self) -> Option<ShortcutRequest> {
+    fn create_pending_shortcut_request(&mut self) -> Option<PendingShortcutRequest> {
         let target_side = self.inactive_pane_side();
         let Some(entry) = self.active_pane().selected_markable_entry().cloned() else {
             self.status = "Shortcut: select an EXE file first.".to_owned();
@@ -652,21 +657,42 @@ impl AppState {
         }
 
         let target_path = PathBuf::from(&entry.virtual_path);
-        let shortcut_name = target_path
-            .file_stem()
-            .map(|stem| stem.to_string_lossy().to_string())
-            .filter(|stem| !stem.is_empty())
-            .map(|stem| format!("{stem}.lnk"))
-            .unwrap_or_else(|| format!("{}.lnk", entry.display_name));
         let working_directory = target_path.parent().map(Path::to_path_buf);
 
-        Some(ShortcutRequest {
+        Some(PendingShortcutRequest {
             target_path: target_path.clone(),
-            shortcut_path: PathBuf::from(target_location).join(shortcut_name),
+            target_directory: PathBuf::from(target_location),
             working_directory,
             icon_path: Some(target_path),
             target_side,
         })
+    }
+
+    fn submit_shortcut_name(&mut self, value: String) {
+        let Some(pending) = self.pending_shortcut_request.take() else {
+            self.status = "Shortcut request is no longer active.".to_owned();
+            return;
+        };
+
+        let request = pending.into_shortcut_request(shortcut_name_with_default_extension(&value));
+        if request.shortcut_path.exists() {
+            self.dialog = DialogState::ShortcutConflict(ShortcutConflictState { request });
+            self.status = "Shortcut already exists.".to_owned();
+        } else {
+            self.start_create_shortcut(request, false);
+        }
+    }
+
+    fn clear_pending_text_input_state(&mut self) {
+        if matches!(
+            self.dialog,
+            DialogState::TextInput(TextInputDialogState {
+                purpose: TextInputPurpose::ShortcutName,
+                ..
+            })
+        ) {
+            self.pending_shortcut_request = None;
+        }
     }
 
     fn start_create_shortcut(&mut self, request: ShortcutRequest, overwrite: bool) {
@@ -1727,6 +1753,42 @@ impl ShortcutConflictState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct PendingShortcutRequest {
+    target_path: PathBuf,
+    target_directory: PathBuf,
+    working_directory: Option<PathBuf>,
+    icon_path: Option<PathBuf>,
+    target_side: PaneSide,
+}
+
+impl PendingShortcutRequest {
+    fn default_shortcut_name(&self) -> String {
+        self.working_directory
+            .as_deref()
+            .and_then(Path::file_name)
+            .map(|name| name.to_string_lossy().trim().to_owned())
+            .filter(|name| !name.is_empty())
+            .or_else(|| {
+                self.target_path
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().trim().to_owned())
+                    .filter(|stem| !stem.is_empty())
+            })
+            .unwrap_or_else(|| "Shortcut".to_owned())
+    }
+
+    fn into_shortcut_request(self, shortcut_name: String) -> ShortcutRequest {
+        ShortcutRequest {
+            target_path: self.target_path,
+            shortcut_path: self.target_directory.join(shortcut_name),
+            working_directory: self.working_directory,
+            icon_path: self.icon_path,
+            target_side: self.target_side,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct ShortcutRequest {
     target_path: PathBuf,
     shortcut_path: PathBuf,
@@ -2007,6 +2069,7 @@ impl TextInputPurpose {
             TextInputPurpose::ConnectFtp => "Connect FTP",
             TextInputPurpose::ArchiveName => "Archive Name",
             TextInputPurpose::ArchiveDestination => "Extract To Folder",
+            TextInputPurpose::ShortcutName => "Shortcut Name",
             TextInputPurpose::FtpProfileField => "FTP Profile Field",
         }
     }
@@ -2020,6 +2083,7 @@ impl TextInputPurpose {
                 | TextInputPurpose::Rename
                 | TextInputPurpose::ArchiveName
                 | TextInputPurpose::ArchiveDestination
+                | TextInputPurpose::ShortcutName
         )
     }
 }
@@ -2214,6 +2278,20 @@ fn archive_name_with_default_extension(value: &str) -> String {
     }
 }
 
+fn shortcut_name_with_default_extension(value: &str) -> String {
+    let trimmed = value.trim();
+    if PathBuf::from(trimmed)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.eq_ignore_ascii_case("lnk"))
+        .unwrap_or(false)
+    {
+        trimmed.to_owned()
+    } else {
+        format!("{trimmed}.lnk")
+    }
+}
+
 fn archive_name_is_supported(value: &str) -> bool {
     PathBuf::from(value)
         .extension()
@@ -2290,6 +2368,7 @@ mod tests {
             task_manager: TaskManager::default(),
             delete_task_panes: BTreeMap::new(),
             transfer_task_panes: BTreeMap::new(),
+            pending_shortcut_request: None,
         }
     }
 
@@ -2411,6 +2490,50 @@ mod tests {
 
         state.left_pane.selected_index = 1;
         assert!(!state.can_create_shortcut_in_other_pane());
+    }
+
+    #[test]
+    fn create_shortcut_prompts_with_parent_folder_name() {
+        let mut state = test_state();
+        state.left_pane.entries = vec![FileEntry {
+            display_name: "launcher.exe".to_owned(),
+            virtual_path: r"C:\Games\Example Game\launcher.exe".to_owned(),
+            kind: FileEntryKind::File,
+            size: Some(1024),
+            modified: None,
+            flags: FileEntryFlags::default(),
+        }];
+        state.left_pane.selected_index = 0;
+        state.right_pane.current_location = r"C:\Users\Player\Desktop".to_owned();
+
+        state.dispatch_action(CommanderAction::CreateShortcutInOtherPane);
+
+        let DialogState::TextInput(dialog) = &state.dialog else {
+            panic!("shortcut should open text input");
+        };
+        assert_eq!(dialog.purpose, TextInputPurpose::ShortcutName);
+        assert_eq!(dialog.value, "Example Game");
+        assert!(state.pending_shortcut_request.is_some());
+    }
+
+    #[test]
+    fn shortcut_name_adds_lnk_extension_only_when_missing() {
+        assert_eq!(
+            shortcut_name_with_default_extension("Example Game"),
+            "Example Game.lnk"
+        );
+        assert_eq!(
+            shortcut_name_with_default_extension("Example Game.lnk"),
+            "Example Game.lnk"
+        );
+        assert_eq!(
+            shortcut_name_with_default_extension("Example Game.LNK"),
+            "Example Game.LNK"
+        );
+        assert_eq!(
+            shortcut_name_with_default_extension("Example Game.url"),
+            "Example Game.url.lnk"
+        );
     }
 
     #[test]
