@@ -138,8 +138,14 @@ impl AppState {
                     self.open_or_confirm_selected();
                 }
             }
+            CommanderAction::GoBack => {
+                self.go_back();
+            }
             CommanderAction::GoParent => {
                 self.go_parent(self.active_pane);
+            }
+            CommanderAction::UpdatePaneScrollOffset { pane, offset } => {
+                self.pane_mut(pane).scroll_offset = offset.max(0) as f32;
             }
             CommanderAction::Refresh => {
                 self.refresh_pane(self.active_pane);
@@ -890,9 +896,37 @@ impl AppState {
 
     fn navigate_active_pane(&mut self, location: String) {
         let active_pane = self.active_pane;
+        self.push_navigation_history(active_pane, &location);
         self.pane_mut(active_pane).current_location = location;
         self.remember_pane_location(active_pane);
         self.refresh_pane(active_pane);
+    }
+
+    fn go_back(&mut self) {
+        if self.show_input_help {
+            self.show_input_help = false;
+            self.status = "Input help closed.".to_owned();
+        } else if self.text_dialog_is_open() {
+            self.handle_text_input(TextInputAction::Cancel);
+        } else if self.dialog != DialogState::None {
+            self.dialog = DialogState::None;
+            self.status = "Cancelled.".to_owned();
+        } else if self.clear_active_error() {
+            self.status = "Error dismissed.".to_owned();
+        } else {
+            self.go_back_or_parent(self.active_pane);
+        }
+    }
+
+    fn go_back_or_parent(&mut self, side: PaneSide) {
+        if let Some(snapshot) = self.pane_mut(side).navigation_history.pop() {
+            self.pane_mut(side).current_location = snapshot.location.clone();
+            self.remember_pane_location(side);
+            self.refresh_pane(side);
+            self.pane_mut(side).restore_snapshot_position(snapshot);
+        } else {
+            self.go_parent(side);
+        }
     }
 
     fn go_parent(&mut self, side: PaneSide) {
@@ -1023,6 +1057,7 @@ impl AppState {
             Ok(_) => {
                 self.dialog = DialogState::None;
                 let active_pane = self.active_pane;
+                self.push_navigation_history(active_pane, &location);
                 self.pane_mut(active_pane).current_location = location.clone();
                 self.remember_pane_location(active_pane);
                 self.refresh_pane(active_pane);
@@ -1083,6 +1118,15 @@ impl AppState {
         self.persist_settings("Pane location saved.");
     }
 
+    fn push_navigation_history(&mut self, side: PaneSide, next_location: &str) {
+        if self.pane(side).current_location == next_location {
+            return;
+        }
+
+        let snapshot = self.pane(side).navigation_snapshot();
+        self.pane_mut(side).navigation_history.push(snapshot);
+    }
+
     fn persist_settings(&mut self, success_status: &str) {
         match settings::save_to_path(&self.settings, &self.settings_path) {
             Ok(()) => self.status = success_status.to_owned(),
@@ -1138,6 +1182,7 @@ pub struct PaneState {
     pub marked_items: BTreeSet<String>,
     pub load_state: PaneLoadState,
     pub scroll_offset: f32,
+    navigation_history: Vec<NavigationSnapshot>,
 }
 
 impl PaneState {
@@ -1150,6 +1195,7 @@ impl PaneState {
             marked_items: BTreeSet::new(),
             load_state: PaneLoadState::Loading,
             scroll_offset: 0.0,
+            navigation_history: Vec::new(),
         }
     }
 
@@ -1263,6 +1309,32 @@ impl PaneState {
     fn follow_selection(&mut self) {
         self.scroll_offset = self.selected_index as f32 * SCROLL_ROW_HEIGHT;
     }
+
+    fn navigation_snapshot(&self) -> NavigationSnapshot {
+        NavigationSnapshot {
+            location: self.current_location.clone(),
+            selected_index: self.selected_index,
+            scroll_offset: self.scroll_offset,
+        }
+    }
+
+    fn restore_snapshot_position(&mut self, snapshot: NavigationSnapshot) {
+        if self.entries.is_empty() {
+            self.selected_index = 0;
+            self.scroll_offset = 0.0;
+            return;
+        }
+
+        self.selected_index = snapshot.selected_index.min(self.entries.len() - 1);
+        self.scroll_offset = snapshot.scroll_offset.max(0.0);
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct NavigationSnapshot {
+    location: String,
+    selected_index: usize,
+    scroll_offset: f32,
 }
 
 const PAGE_SIZE: usize = 10;
@@ -2177,6 +2249,7 @@ mod tests {
                 marked_items: BTreeSet::new(),
                 load_state: PaneLoadState::Ready,
                 scroll_offset: 0.0,
+                navigation_history: Vec::new(),
             },
             right_pane: PaneState {
                 title: "Right".to_owned(),
@@ -2186,6 +2259,7 @@ mod tests {
                 marked_items: BTreeSet::new(),
                 load_state: PaneLoadState::Ready,
                 scroll_offset: 0.0,
+                navigation_history: Vec::new(),
             },
             active_pane: PaneSide::Left,
             status: String::new(),
@@ -2328,6 +2402,7 @@ mod tests {
             marked_items: BTreeSet::from(["missing".to_owned(), "c".to_owned()]),
             load_state: PaneLoadState::Ready,
             scroll_offset: 0.0,
+            navigation_history: Vec::new(),
         };
 
         pane.entries = vec![test_entry("c"), test_entry("b")];
@@ -2412,6 +2487,61 @@ mod tests {
             std::fs::read(target_dir.join("copy-me.txt")).expect("read copied file"),
             b"copy"
         );
+
+        std::fs::remove_dir_all(&root).expect("remove test dir");
+    }
+
+    #[test]
+    fn go_back_restores_previous_folder_selection_and_scroll_offset() {
+        let root = unique_test_dir();
+        let alpha_dir = root.join("alpha");
+        let beta_dir = root.join("beta");
+        std::fs::create_dir_all(&alpha_dir).expect("create alpha dir");
+        std::fs::create_dir_all(&beta_dir).expect("create beta dir");
+
+        let mut state = test_state();
+        state.left_pane.current_location = root.to_string_lossy().to_string();
+        state.refresh_pane(PaneSide::Left);
+        let alpha_index = state
+            .left_pane
+            .entries
+            .iter()
+            .position(|entry| entry.virtual_path == alpha_dir.to_string_lossy())
+            .expect("alpha should be listed");
+        state.left_pane.selected_index = alpha_index;
+        state.left_pane.scroll_offset = 96.0;
+
+        state.dispatch_action(CommanderAction::OpenSelected);
+        assert_eq!(
+            state.left_pane.current_location,
+            alpha_dir.to_string_lossy()
+        );
+
+        state.left_pane.selected_index = 0;
+        state.left_pane.scroll_offset = 0.0;
+        state.dispatch_action(CommanderAction::GoBack);
+
+        assert_eq!(state.left_pane.current_location, root.to_string_lossy());
+        assert_eq!(state.left_pane.selected_index, alpha_index);
+        assert_eq!(state.left_pane.scroll_offset, 96.0);
+
+        std::fs::remove_dir_all(&root).expect("remove test dir");
+    }
+
+    #[test]
+    fn go_back_without_history_navigates_to_parent_folder() {
+        let root = unique_test_dir();
+        let child_dir = root.join("child");
+        std::fs::create_dir_all(&child_dir).expect("create child dir");
+
+        let mut state = test_state();
+        state.left_pane.current_location = child_dir.to_string_lossy().to_string();
+        state.refresh_pane(PaneSide::Left);
+
+        state.dispatch_action(CommanderAction::GoBack);
+
+        assert_eq!(state.left_pane.current_location, root.to_string_lossy());
+        assert!(state.left_pane.navigation_history.is_empty());
 
         std::fs::remove_dir_all(&root).expect("remove test dir");
     }

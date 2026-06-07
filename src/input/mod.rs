@@ -404,7 +404,7 @@ fn action_for_button(
             Some(CommanderAction::SwitchPane)
         }
         Button::South => Some(CommanderAction::OpenSelected),
-        Button::East => Some(CommanderAction::Cancel),
+        Button::East => Some(CommanderAction::GoBack),
         Button::West => Some(CommanderAction::ToggleMarkSelected),
         Button::North => Some(CommanderAction::OpenCommandPalette),
         Button::Start => Some(CommanderAction::OpenSettings),

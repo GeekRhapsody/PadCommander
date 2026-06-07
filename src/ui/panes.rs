@@ -70,11 +70,12 @@ fn pane(
             header_row(ui);
             ui.separator();
 
-            egui::ScrollArea::vertical()
+            let output = egui::ScrollArea::vertical()
                 .id_salt(match side {
                     PaneSide::Left => "left_pane_entries",
                     PaneSide::Right => "right_pane_entries",
                 })
+                .vertical_scroll_offset(pane.scroll_offset)
                 .auto_shrink([false, false])
                 .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
                 .show_rows(ui, ENTRY_ROW_HEIGHT, pane.entries.len(), |ui, row_range| {
@@ -103,15 +104,16 @@ fn pane(
                             .interact(egui::Sense::click())
                             .on_hover_text(&entry.virtual_path);
 
-                        if selected {
-                            response.scroll_to_me(Some(egui::Align::Center));
-                        }
-
                         if response.clicked() {
                             actions.push(CommanderAction::SelectEntry { pane: side, index });
                         }
                     }
                 });
+
+            let offset = output.state.offset.y.round() as i32;
+            if offset != pane.scroll_offset.round() as i32 {
+                actions.push(CommanderAction::UpdatePaneScrollOffset { pane: side, offset });
+            }
         });
 }
 
