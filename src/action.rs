@@ -1,4 +1,4 @@
-use crate::state::PaneSide;
+use crate::state::{PaneSide, PaneSortOrder};
 
 #[allow(dead_code)]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -35,6 +35,8 @@ pub enum CommanderAction {
     StartDemoTask,
     StartFailingDemoTask,
     CancelActiveTask,
+    OpenSortBy,
+    SelectSortOrder(PaneSortOrder),
     OpenFavourites,
     AddFavourite,
     RemoveFavourite,

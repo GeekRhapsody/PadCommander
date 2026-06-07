@@ -76,7 +76,8 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
         | DialogState::CommandMenu(_)
         | DialogState::Settings(_)
         | DialogState::Favourites(_)
-        | DialogState::Decompress(_) => &state.dialog,
+        | DialogState::Decompress(_)
+        | DialogState::SortBy(_) => &state.dialog,
         DialogState::None | DialogState::TextInput(_) => return,
     };
 
@@ -309,6 +310,24 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 if ui.add_sized([360.0, 34.0], button).clicked() {
                                     actions.push(CommanderAction::FocusDecompressOption(index));
                                     actions.push(CommanderAction::Confirm);
+                                }
+                            }
+                            ui.add_space(8.0);
+                            ui.label("D-pad/arrow keys move. A / Enter selects. B / Esc cancels.");
+                        }
+                        DialogState::SortBy(sort_by) => {
+                            ui.heading("Sort By");
+                            ui.add_space(8.0);
+                            for (index, sort_order) in sort_by.choices().iter().enumerate() {
+                                let focused = index == sort_by.focused_index;
+                                let mut button = egui::Button::new(sort_order.label());
+                                if focused {
+                                    button = button
+                                        .fill(egui::Color32::from_rgb(73, 104, 94))
+                                        .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE));
+                                }
+                                if ui.add_sized([320.0, 34.0], button).clicked() {
+                                    actions.push(CommanderAction::SelectSortOrder(*sort_order));
                                 }
                             }
                             ui.add_space(8.0);

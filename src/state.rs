@@ -7,6 +7,7 @@ use crate::{
 };
 
 use std::{
+    cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     time::SystemTime,
@@ -30,6 +31,32 @@ impl PaneSide {
         match self {
             PaneSide::Left => PaneSide::Right,
             PaneSide::Right => PaneSide::Left,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PaneSortOrder {
+    #[default]
+    FilenameAsc,
+    FilenameDesc,
+    DateAsc,
+    DateDesc,
+    SizeAsc,
+    SizeDesc,
+}
+
+impl PaneSortOrder {
+    pub const COUNT: usize = 6;
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::FilenameAsc => "Filename (A to Z)",
+            Self::FilenameDesc => "Filename (Z to A)",
+            Self::DateAsc => "Date (Oldest to Newest)",
+            Self::DateDesc => "Date (Newest to Oldest)",
+            Self::SizeAsc => "Size (Smallest to Largest)",
+            Self::SizeDesc => "Size (Largest to Smallest)",
         }
     }
 }
@@ -283,6 +310,12 @@ impl AppState {
             CommanderAction::CreateShortcutInOtherPane => {
                 self.begin_create_shortcut_in_other_pane()
             }
+            CommanderAction::OpenSortBy => {
+                self.dialog =
+                    DialogState::SortBy(SortByModalState::new(self.active_pane().sort_order));
+                self.status = "Sort options opened.".to_owned();
+            }
+            CommanderAction::SelectSortOrder(sort_order) => self.apply_active_pane_sort(sort_order),
             CommanderAction::StartDemoTask => self.start_demo_task(false),
             CommanderAction::StartFailingDemoTask => self.start_demo_task(true),
             CommanderAction::CancelActiveTask => {
@@ -548,6 +581,9 @@ impl AppState {
             DialogState::Decompress(decompress) => {
                 let request = decompress.selected_request();
                 self.start_archive_decompression(request);
+            }
+            DialogState::SortBy(sort_by) => {
+                self.apply_active_pane_sort(sort_by.selected_sort_order());
             }
             DialogState::Message { .. } => {
                 self.dialog = DialogState::None;
@@ -1014,6 +1050,7 @@ impl AppState {
         match result {
             Ok(entries) => {
                 pane.entries = filter_hidden_entries(entries, show_hidden_files);
+                pane.sort_entries();
                 pane.retain_valid_marks();
                 pane.restore_selection(previous_selection_path.as_deref());
                 pane.load_state = PaneLoadState::Ready;
@@ -1058,12 +1095,31 @@ impl AppState {
                 decompress.move_focus(movement);
                 true
             }
+            DialogState::SortBy(sort_by) => {
+                sort_by.move_focus(movement);
+                true
+            }
             DialogState::None
             | DialogState::Message { .. }
             | DialogState::TextInput(_)
             | DialogState::DeleteConfirm(_)
             | DialogState::ShortcutConflict(_) => false,
         }
+    }
+
+    fn apply_active_pane_sort(&mut self, sort_order: PaneSortOrder) {
+        let active_pane = self.active_pane;
+        let pane_label = self.active_pane_label();
+        let previous_selection_path = self
+            .pane(active_pane)
+            .selected_entry()
+            .map(|entry| entry.virtual_path.clone());
+        let pane = self.pane_mut(active_pane);
+        pane.sort_order = sort_order;
+        pane.sort_entries();
+        pane.restore_selection(previous_selection_path.as_deref());
+        self.dialog = DialogState::None;
+        self.status = format!("{pane_label} pane sorted by {}.", sort_order.label());
     }
 
     fn adjust_focused_setting(&mut self, delta: f32) {
@@ -1298,7 +1354,8 @@ impl AppState {
             | DialogState::CommandMenu(_)
             | DialogState::Settings(_)
             | DialogState::Favourites(_)
-            | DialogState::Decompress(_) => None,
+            | DialogState::Decompress(_)
+            | DialogState::SortBy(_) => None,
         }
     }
 }
@@ -1311,6 +1368,7 @@ pub struct PaneState {
     pub selected_index: usize,
     pub marked_items: BTreeSet<String>,
     pub load_state: PaneLoadState,
+    pub sort_order: PaneSortOrder,
     pub scroll_offset: f32,
     pub needs_scroll_to_selected: bool,
     navigation_history: Vec<NavigationSnapshot>,
@@ -1325,6 +1383,7 @@ impl PaneState {
             selected_index: 0,
             marked_items: BTreeSet::new(),
             load_state: PaneLoadState::Loading,
+            sort_order: PaneSortOrder::default(),
             scroll_offset: 0.0,
             needs_scroll_to_selected: true,
             navigation_history: Vec::new(),
@@ -1452,6 +1511,15 @@ impl PaneState {
         self.needs_scroll_to_selected = false;
     }
 
+    fn sort_entries(&mut self) {
+        let sort_order = self.sort_order;
+        self.entries.sort_by(|left, right| {
+            file_entry_sort_group(left)
+                .cmp(&file_entry_sort_group(right))
+                .then_with(|| compare_file_entries(left, right, sort_order))
+        });
+    }
+
     fn navigation_snapshot(&self) -> NavigationSnapshot {
         NavigationSnapshot {
             location: self.current_location.clone(),
@@ -1551,6 +1619,72 @@ impl FileEntry {
     }
 }
 
+fn file_entry_sort_group(entry: &FileEntry) -> u8 {
+    match entry.kind {
+        FileEntryKind::Parent => 0,
+        FileEntryKind::Drive => 1,
+        FileEntryKind::Directory => 2,
+        FileEntryKind::Archive
+        | FileEntryKind::File
+        | FileEntryKind::FtpItem
+        | FileEntryKind::Unknown => 3,
+    }
+}
+
+fn compare_file_entries(
+    left: &FileEntry,
+    right: &FileEntry,
+    sort_order: PaneSortOrder,
+) -> Ordering {
+    match sort_order {
+        PaneSortOrder::FilenameAsc => compare_names(left, right),
+        PaneSortOrder::FilenameDesc => compare_names(right, left),
+        PaneSortOrder::DateAsc => compare_optional_oldest_first(left.modified, right.modified)
+            .then_with(|| compare_names(left, right)),
+        PaneSortOrder::DateDesc => compare_optional_newest_first(left.modified, right.modified)
+            .then_with(|| compare_names(left, right)),
+        PaneSortOrder::SizeAsc => compare_optional_smallest_first(left.size, right.size)
+            .then_with(|| compare_names(left, right)),
+        PaneSortOrder::SizeDesc => compare_optional_largest_first(left.size, right.size)
+            .then_with(|| compare_names(left, right)),
+    }
+}
+
+fn compare_names(left: &FileEntry, right: &FileEntry) -> Ordering {
+    left.display_name
+        .to_lowercase()
+        .cmp(&right.display_name.to_lowercase())
+}
+
+fn compare_optional_oldest_first<T: Ord>(left: Option<T>, right: Option<T>) -> Ordering {
+    compare_optional_known_first(left, right, |left, right| left.cmp(&right))
+}
+
+fn compare_optional_newest_first<T: Ord>(left: Option<T>, right: Option<T>) -> Ordering {
+    compare_optional_known_first(left, right, |left, right| right.cmp(&left))
+}
+
+fn compare_optional_smallest_first<T: Ord>(left: Option<T>, right: Option<T>) -> Ordering {
+    compare_optional_known_first(left, right, |left, right| left.cmp(&right))
+}
+
+fn compare_optional_largest_first<T: Ord>(left: Option<T>, right: Option<T>) -> Ordering {
+    compare_optional_known_first(left, right, |left, right| right.cmp(&left))
+}
+
+fn compare_optional_known_first<T: Ord>(
+    left: Option<T>,
+    right: Option<T>,
+    compare_known: impl FnOnce(T, T) -> Ordering,
+) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => compare_known(left, right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct MarkedSummary {
     pub count: usize,
@@ -1611,6 +1745,7 @@ pub enum DialogState {
     Settings(SettingsModalState),
     Favourites(FavouritesModalState),
     Decompress(DecompressModalState),
+    SortBy(SortByModalState),
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -1775,6 +1910,59 @@ struct DecompressRequest {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SortByModalState {
+    pub focused_index: usize,
+}
+
+impl SortByModalState {
+    pub fn new(current_sort_order: PaneSortOrder) -> Self {
+        Self {
+            focused_index: Self::index_for_sort_order(current_sort_order),
+        }
+    }
+
+    pub fn choices(&self) -> [PaneSortOrder; PaneSortOrder::COUNT] {
+        [
+            PaneSortOrder::FilenameAsc,
+            PaneSortOrder::FilenameDesc,
+            PaneSortOrder::DateAsc,
+            PaneSortOrder::DateDesc,
+            PaneSortOrder::SizeAsc,
+            PaneSortOrder::SizeDesc,
+        ]
+    }
+
+    pub fn move_focus(&mut self, movement: SelectionMovement) {
+        let last_index = PaneSortOrder::COUNT - 1;
+        self.focused_index = match movement {
+            SelectionMovement::Up | SelectionMovement::PageUp => {
+                self.focused_index.saturating_sub(1)
+            }
+            SelectionMovement::Down | SelectionMovement::PageDown => {
+                (self.focused_index + 1).min(last_index)
+            }
+            SelectionMovement::Home => 0,
+            SelectionMovement::End => last_index,
+        };
+    }
+
+    pub fn selected_sort_order(&self) -> PaneSortOrder {
+        self.choices()[self.focused_index.min(PaneSortOrder::COUNT - 1)]
+    }
+
+    fn index_for_sort_order(sort_order: PaneSortOrder) -> usize {
+        match sort_order {
+            PaneSortOrder::FilenameAsc => 0,
+            PaneSortOrder::FilenameDesc => 1,
+            PaneSortOrder::DateAsc => 2,
+            PaneSortOrder::DateDesc => 3,
+            PaneSortOrder::SizeAsc => 4,
+            PaneSortOrder::SizeDesc => 5,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommandMenuState {
     pub focused_index: usize,
     pub entries: Vec<CommandMenuEntry>,
@@ -1805,6 +1993,7 @@ impl CommandMenuState {
             CommandMenuEntry::new("Move", CommanderAction::MoveToOtherPane),
             CommandMenuEntry::new("Compress", CommanderAction::CompressToOtherPane),
             CommandMenuEntry::new("Decompress", CommanderAction::DecompressToOtherPane),
+            CommandMenuEntry::new("Sort By", CommanderAction::OpenSortBy),
             CommandMenuEntry::new("Rename", CommanderAction::Rename),
             CommandMenuEntry::new("Delete", CommanderAction::Delete),
             CommandMenuEntry::new("Cancel Task", CommanderAction::CancelActiveTask),
@@ -2451,6 +2640,7 @@ pub struct DispatchResult {
 mod tests {
     use super::*;
     use crate::action::CommanderAction;
+    use std::time::Duration;
 
     fn test_entry(name: &str) -> FileEntry {
         FileEntry {
@@ -2473,6 +2663,25 @@ mod tests {
         }
     }
 
+    fn directory_entry(name: &str) -> FileEntry {
+        FileEntry {
+            kind: FileEntryKind::Directory,
+            size: None,
+            ..test_entry(name)
+        }
+    }
+
+    fn parent_entry() -> FileEntry {
+        FileEntry {
+            display_name: "..".to_owned(),
+            virtual_path: fs::ROOTS_LOCATION.to_owned(),
+            kind: FileEntryKind::Parent,
+            size: None,
+            modified: None,
+            flags: FileEntryFlags::default(),
+        }
+    }
+
     fn test_state() -> AppState {
         AppState {
             settings: Settings::default(),
@@ -2484,6 +2693,7 @@ mod tests {
                 selected_index: 1,
                 marked_items: BTreeSet::new(),
                 load_state: PaneLoadState::Ready,
+                sort_order: PaneSortOrder::default(),
                 scroll_offset: 0.0,
                 needs_scroll_to_selected: false,
                 navigation_history: Vec::new(),
@@ -2495,6 +2705,7 @@ mod tests {
                 selected_index: 1,
                 marked_items: BTreeSet::new(),
                 load_state: PaneLoadState::Ready,
+                sort_order: PaneSortOrder::default(),
                 scroll_offset: 0.0,
                 needs_scroll_to_selected: false,
                 navigation_history: Vec::new(),
@@ -2522,6 +2733,110 @@ mod tests {
 
         state.dispatch_action(CommanderAction::SwitchPane);
         assert_eq!(state.active_pane, PaneSide::Left);
+    }
+
+    #[test]
+    fn command_menu_opens_sort_by_modal() {
+        let mut state = test_state();
+
+        state.dispatch_action(CommanderAction::OpenCommandPalette);
+        let DialogState::CommandMenu(menu) = &mut state.dialog else {
+            panic!("expected command menu");
+        };
+        menu.focused_index = menu
+            .entries
+            .iter()
+            .position(|entry| entry.action == CommanderAction::OpenSortBy)
+            .unwrap();
+
+        state.dispatch_action(CommanderAction::Confirm);
+
+        assert!(matches!(state.dialog, DialogState::SortBy(_)));
+    }
+
+    #[test]
+    fn sort_by_filename_desc_reorders_current_pane_with_groups_preserved() {
+        let mut state = test_state();
+        state.left_pane.entries = vec![
+            test_entry("alpha.txt"),
+            directory_entry("beta"),
+            parent_entry(),
+            test_entry("zulu.txt"),
+            directory_entry("alpha"),
+        ];
+
+        state.dispatch_action(CommanderAction::SelectSortOrder(
+            PaneSortOrder::FilenameDesc,
+        ));
+
+        let names: Vec<_> = state
+            .left_pane
+            .entries
+            .iter()
+            .map(|entry| entry.display_name.as_str())
+            .collect();
+        assert_eq!(names, ["..", "beta", "alpha", "zulu.txt", "alpha.txt"]);
+    }
+
+    #[test]
+    fn sort_by_date_and_size_keep_unknown_values_last() {
+        let mut state = test_state();
+        let older = SystemTime::UNIX_EPOCH + Duration::from_secs(10);
+        let newer = SystemTime::UNIX_EPOCH + Duration::from_secs(20);
+        state.left_pane.entries = vec![
+            FileEntry {
+                display_name: "unknown.txt".to_owned(),
+                size: None,
+                modified: None,
+                ..test_entry("unknown.txt")
+            },
+            FileEntry {
+                display_name: "old-small.txt".to_owned(),
+                size: Some(1),
+                modified: Some(older),
+                ..test_entry("old-small.txt")
+            },
+            FileEntry {
+                display_name: "new-large.txt".to_owned(),
+                size: Some(10),
+                modified: Some(newer),
+                ..test_entry("new-large.txt")
+            },
+        ];
+
+        state.dispatch_action(CommanderAction::SelectSortOrder(PaneSortOrder::DateDesc));
+        let date_names: Vec<_> = state
+            .left_pane
+            .entries
+            .iter()
+            .map(|entry| entry.display_name.as_str())
+            .collect();
+        assert_eq!(
+            date_names,
+            ["new-large.txt", "old-small.txt", "unknown.txt"]
+        );
+
+        state.dispatch_action(CommanderAction::SelectSortOrder(PaneSortOrder::SizeAsc));
+        let size_names: Vec<_> = state
+            .left_pane
+            .entries
+            .iter()
+            .map(|entry| entry.display_name.as_str())
+            .collect();
+        assert_eq!(
+            size_names,
+            ["old-small.txt", "new-large.txt", "unknown.txt"]
+        );
+    }
+
+    #[test]
+    fn sort_order_is_pane_state_not_persisted_settings() {
+        let mut state = test_state();
+
+        state.dispatch_action(CommanderAction::SelectSortOrder(PaneSortOrder::SizeDesc));
+
+        assert_eq!(state.left_pane.sort_order, PaneSortOrder::SizeDesc);
+        assert_eq!(Settings::default(), state.settings);
     }
 
     #[test]
@@ -2751,6 +3066,7 @@ mod tests {
             selected_index: 1,
             marked_items: BTreeSet::from(["missing".to_owned(), "c".to_owned()]),
             load_state: PaneLoadState::Ready,
+            sort_order: PaneSortOrder::default(),
             scroll_offset: 0.0,
             needs_scroll_to_selected: false,
             navigation_history: Vec::new(),
@@ -2775,6 +3091,7 @@ mod tests {
             selected_index: 0,
             marked_items: BTreeSet::new(),
             load_state: PaneLoadState::Ready,
+            sort_order: PaneSortOrder::default(),
             scroll_offset: 420.0,
             needs_scroll_to_selected: false,
             navigation_history: Vec::new(),
