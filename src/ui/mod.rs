@@ -1,4 +1,3 @@
-pub mod action_bar;
 pub mod panes;
 pub mod progress;
 pub mod text_input;
@@ -19,11 +18,6 @@ pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<CommanderAction> {
         .exact_size(64.0)
         .frame(panel_frame(egui::Color32::from_rgb(31, 35, 34)))
         .show_inside(ui, |ui| header(ui, state));
-
-    egui::Panel::bottom("command_bar")
-        .exact_size(112.0)
-        .frame(panel_frame(egui::Color32::from_rgb(28, 31, 33)))
-        .show_inside(ui, |ui| action_bar::show(ui, state, &mut actions));
 
     egui::Panel::bottom("task_progress")
         .exact_size(118.0)
