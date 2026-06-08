@@ -92,11 +92,13 @@ impl AppState {
         let left_location = settings
             .last_left_pane_location
             .clone()
-            .unwrap_or_else(|| initial_location.clone());
+            .filter(|location| fs::location_exists(location))
+            .unwrap_or_else(|| fs::default_open_location(&initial_location));
         let right_location = settings
             .last_right_pane_location
             .clone()
-            .unwrap_or_else(|| initial_location.clone());
+            .filter(|location| fs::location_exists(location))
+            .unwrap_or_else(|| fs::default_open_location(&initial_location));
         settings.last_left_pane_location = Some(left_location.clone());
         settings.last_right_pane_location = Some(right_location.clone());
         let mut state = Self {
@@ -1020,14 +1022,25 @@ impl AppState {
     }
 
     fn go_back_or_parent(&mut self, side: PaneSide) {
-        if let Some(snapshot) = self.pane_mut(side).navigation_history.pop() {
-            self.pane_mut(side).current_location = snapshot.location.clone();
-            self.remember_pane_location(side);
-            self.refresh_pane(side);
-            self.pane_mut(side).restore_snapshot_position(snapshot);
-        } else {
-            self.go_parent(side);
+        while let Some(snapshot) = self.pane_mut(side).navigation_history.pop() {
+            if fs::location_exists(&snapshot.location) {
+                self.pane_mut(side).current_location = snapshot.location.clone();
+                self.remember_pane_location(side);
+                self.refresh_pane(side);
+                self.pane_mut(side).restore_snapshot_position(snapshot);
+                return;
+            }
+
+            let fallback_location = fs::parent_location(&snapshot.location);
+            if fs::location_exists(&fallback_location) {
+                self.pane_mut(side).current_location = fallback_location;
+                self.remember_pane_location(side);
+                self.refresh_pane(side);
+                return;
+            }
         }
+
+        self.go_parent(side);
     }
 
     fn go_parent(&mut self, side: PaneSide) {
@@ -3268,6 +3281,44 @@ mod tests {
 
         assert_eq!(state.left_pane.current_location, root.to_string_lossy());
         assert!(state.left_pane.navigation_history.is_empty());
+
+        std::fs::remove_dir_all(&root).expect("remove test dir");
+    }
+
+    #[test]
+    fn go_back_on_removed_history_location_navigates_to_parent_folder() {
+        let root = unique_test_dir();
+        let child_dir = root.join("child");
+        let grandchild_dir = child_dir.join("grandchild");
+        std::fs::create_dir_all(&grandchild_dir).expect("create nested dirs");
+
+        let mut state = test_state();
+        state.left_pane.current_location = root.to_string_lossy().to_string();
+        state.refresh_pane(PaneSide::Left);
+
+        let child_index = state
+            .left_pane
+            .entries
+            .iter()
+            .position(|entry| entry.virtual_path == child_dir.to_string_lossy())
+            .expect("child should be listed");
+        state.left_pane.selected_index = child_index;
+        state.dispatch_action(CommanderAction::OpenSelected);
+
+        let grandchild_index = state
+            .left_pane
+            .entries
+            .iter()
+            .position(|entry| entry.virtual_path == grandchild_dir.to_string_lossy())
+            .expect("grandchild should be listed");
+        state.left_pane.selected_index = grandchild_index;
+        state.dispatch_action(CommanderAction::OpenSelected);
+
+        std::fs::remove_dir_all(&child_dir).expect("remove history folder");
+
+        state.dispatch_action(CommanderAction::GoBack);
+
+        assert_eq!(state.left_pane.current_location, root.to_string_lossy());
 
         std::fs::remove_dir_all(&root).expect("remove test dir");
     }

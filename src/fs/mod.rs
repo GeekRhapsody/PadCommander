@@ -114,6 +114,36 @@ pub fn parent_location(location: &str) -> String {
         .unwrap_or_else(|| ROOTS_LOCATION.to_owned())
 }
 
+pub fn location_exists(location: &str) -> bool {
+    if location == ROOTS_LOCATION {
+        return true;
+    }
+
+    Path::new(location).is_dir()
+}
+
+pub fn default_open_location(initial_location: &str) -> String {
+    user_documents_location().unwrap_or_else(|| initial_location.to_owned())
+}
+
+fn user_documents_location() -> Option<String> {
+    env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .or_else(|| {
+            let drive = env::var_os("HOMEDRIVE")?;
+            let path = env::var_os("HOMEPATH")?;
+            let mut home = PathBuf::from(drive);
+            home.push(path);
+            Some(home)
+        })
+        .map(|mut home| {
+            home.push("Documents");
+            home
+        })
+        .filter(|path| path.is_dir())
+        .map(|path| path_to_location(&path))
+}
+
 fn user_profile_location() -> Option<String> {
     env::var_os("USERPROFILE")
         .map(PathBuf::from)
@@ -440,5 +470,30 @@ mod tests {
             .map(|entry| entry.display_name.as_str())
             .collect();
         assert_eq!(names, ["..", "alpha", "beta", "Alpha.txt", "z-file.txt"]);
+    }
+
+    #[test]
+    fn location_exists_returns_true_for_roots_location() {
+        assert!(location_exists(ROOTS_LOCATION));
+    }
+
+    #[test]
+    fn default_open_location_uses_documents_folder_when_available() {
+        let temp_home = std::env::temp_dir().join("pad_commander_test_home");
+        let documents = temp_home.join("Documents");
+        std::fs::create_dir_all(&documents).expect("create documents folder");
+
+        let original_userprofile = std::env::var_os("USERPROFILE");
+        unsafe { std::env::set_var("USERPROFILE", &temp_home) };
+
+        let default_location = default_open_location("C:\\");
+
+        if let Some(original) = original_userprofile {
+            unsafe { std::env::set_var("USERPROFILE", original) };
+        } else {
+            unsafe { std::env::remove_var("USERPROFILE") };
+        }
+
+        assert_eq!(default_location, documents.to_string_lossy());
     }
 }
