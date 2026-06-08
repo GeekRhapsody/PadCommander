@@ -122,6 +122,13 @@ pub fn location_exists(location: &str) -> bool {
     Path::new(location).is_dir()
 }
 
+pub fn get_free_space(location: &str) -> Option<u64> {
+    if location == ROOTS_LOCATION {
+        return None;
+    }
+    windows::get_disk_free_space(Path::new(location))
+}
+
 pub fn default_open_location(initial_location: &str) -> String {
     user_documents_location().unwrap_or_else(|| initial_location.to_owned())
 }

@@ -117,6 +117,9 @@ fn pane(
             } else if offset != pane.scroll_offset.round() as i32 {
                 actions.push(CommanderAction::UpdatePaneScrollOffset { pane: side, offset });
             }
+
+            ui.separator();
+            bottom_status_bar(ui, pane, &pane.current_location);
         });
 }
 
@@ -438,6 +441,28 @@ fn left_aligned_label(ui: &mut egui::Ui, width: f32, text: egui::RichText) {
             ui.add(egui::Label::new(text).truncate());
         },
     );
+}
+
+fn bottom_status_bar(ui: &mut egui::Ui, pane: &PaneState, location: &str) {
+    let pane_summary = pane.pane_summary();
+    let summary_text = pane_summary.format();
+
+    let mut status_parts = vec![summary_text];
+
+    if let Some(free_space) = crate::fs::get_free_space(location) {
+        let free_label = crate::state::FileEntry::size_value_label(free_space);
+        status_parts.push(format!("Free: {}", free_label));
+    }
+
+    ui.horizontal(|ui| {
+        ui.set_height(ROW_HEIGHT);
+        for (i, part) in status_parts.iter().enumerate() {
+            if i > 0 {
+                ui.separator();
+            }
+            ui.label(part);
+        }
+    });
 }
 
 #[cfg(test)]

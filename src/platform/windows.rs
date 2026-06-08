@@ -182,6 +182,36 @@ pub fn create_shortcut(
     Err("Windows shortcuts are only supported on Windows.".to_owned())
 }
 
+#[cfg(windows)]
+pub fn get_disk_free_space(path: &std::path::Path) -> Option<u64> {
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+
+    let path_wide: Vec<u16> = wide_null(path);
+    let mut free_bytes = 0u64;
+
+    // SAFETY: GetDiskFreeSpaceExW receives a valid, NUL-terminated UTF-16 path
+    // and we pass valid pointers for the output parameter.
+    let result = unsafe {
+        GetDiskFreeSpaceExW(
+            path_wide.as_ptr(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut free_bytes,
+        )
+    };
+
+    if result != 0 {
+        Some(free_bytes)
+    } else {
+        None
+    }
+}
+
+#[cfg(not(windows))]
+pub fn get_disk_free_space(_path: &std::path::Path) -> Option<u64> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

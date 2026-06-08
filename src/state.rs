@@ -1462,6 +1462,25 @@ impl PaneState {
         summary
     }
 
+    pub fn pane_summary(&self) -> PaneSummary {
+        let mut summary = PaneSummary::default();
+
+        for entry in self.entries.iter() {
+            // Count only files and archives, not directories or special entries
+            if matches!(
+                entry.kind,
+                FileEntryKind::File | FileEntryKind::Archive
+            ) {
+                summary.file_count += 1;
+                if let Some(size) = entry.size {
+                    summary.total_size = summary.total_size.saturating_add(size);
+                }
+            }
+        }
+
+        summary
+    }
+
     pub fn operation_sources(&self) -> Vec<FileEntry> {
         let marked = self.marked_entries();
         if !marked.is_empty() {
@@ -1717,6 +1736,19 @@ impl MarkedSummary {
         } else {
             format!("{} item(s), {size_label}", self.count)
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PaneSummary {
+    pub file_count: usize,
+    pub total_size: u64,
+}
+
+impl PaneSummary {
+    pub fn format(&self) -> String {
+        let size_label = FileEntry::size_value_label(self.total_size);
+        format!("{} file(s) | {size_label}", self.file_count)
     }
 }
 
