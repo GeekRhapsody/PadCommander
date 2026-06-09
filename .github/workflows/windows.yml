@@ -1,14 +1,16 @@
-name: Windows Rust
+name: Windows Release
 
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
-  check:
-    name: Check and test
+  release:
+    name: Build and publish release
     runs-on: windows-latest
 
     steps:
@@ -18,13 +20,22 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt
 
       - name: Cargo fmt
         run: cargo fmt --check
 
-      - name: Cargo check
-        run: cargo check
+      - name: Build release binary
+        run: cargo build --release
 
-      - name: Cargo test
-        run: cargo test
+      - name: Package release binary
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path target\release\pad-commander.exe -DestinationPath dist\pad-commander-${{ github.ref_name }}-windows-x86_64.zip -Force
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/pad-commander-${{ github.ref_name }}-windows-x86_64.zip
+          generate_release_notes: true

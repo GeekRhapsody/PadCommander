@@ -200,11 +200,7 @@ pub fn get_disk_free_space(path: &std::path::Path) -> Option<u64> {
         )
     };
 
-    if result != 0 {
-        Some(free_bytes)
-    } else {
-        None
-    }
+    if result != 0 { Some(free_bytes) } else { None }
 }
 
 #[cfg(not(windows))]

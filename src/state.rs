@@ -1467,10 +1467,7 @@ impl PaneState {
 
         for entry in self.entries.iter() {
             // Count only files and archives, not directories or special entries
-            if matches!(
-                entry.kind,
-                FileEntryKind::File | FileEntryKind::Archive
-            ) {
+            if matches!(entry.kind, FileEntryKind::File | FileEntryKind::Archive) {
                 summary.file_count += 1;
                 if let Some(size) = entry.size {
                     summary.total_size = summary.total_size.saturating_add(size);
