@@ -1060,6 +1060,8 @@ impl AppState {
         let show_hidden_files = self.settings.show_hidden_files;
         let pane = self.pane_mut(side);
 
+        pane.cached_free_space = crate::fs::get_free_space(&location);
+
         match result {
             Ok(entries) => {
                 pane.entries = filter_hidden_entries(entries, show_hidden_files);
@@ -1384,6 +1386,7 @@ pub struct PaneState {
     pub sort_order: PaneSortOrder,
     pub scroll_offset: f32,
     pub needs_scroll_to_selected: bool,
+    pub cached_free_space: Option<u64>,
     navigation_history: Vec<NavigationSnapshot>,
 }
 
@@ -1399,6 +1402,7 @@ impl PaneState {
             sort_order: PaneSortOrder::default(),
             scroll_offset: 0.0,
             needs_scroll_to_selected: true,
+            cached_free_space: None,
             navigation_history: Vec::new(),
         }
     }
@@ -1621,10 +1625,18 @@ impl FileEntry {
     }
 
     pub fn size_value_label(size: u64) -> String {
-        if size >= 1024 * 1024 {
-            format!("{} MB", size / (1024 * 1024))
-        } else if size >= 1024 {
-            format!("{} KB", size / 1024)
+        const KB: u64 = 1024;
+        const MB: u64 = 1024 * KB;
+        const GB: u64 = 1024 * MB;
+        const TB: u64 = 1024 * GB;
+        if size >= TB {
+            format!("{:.1} TB", size as f64 / TB as f64)
+        } else if size >= GB {
+            format!("{:.1} GB", size as f64 / GB as f64)
+        } else if size >= MB {
+            format!("{:.1} MB", size as f64 / MB as f64)
+        } else if size >= KB {
+            format!("{} KB", size / KB)
         } else {
             format!("{size} B")
         }

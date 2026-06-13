@@ -121,7 +121,7 @@ fn pane(
             }
 
             ui.separator();
-            bottom_status_bar(ui, pane, &pane.current_location);
+            bottom_status_bar(ui, pane);
         });
 }
 
@@ -445,13 +445,13 @@ fn left_aligned_label(ui: &mut egui::Ui, width: f32, text: egui::RichText) {
     );
 }
 
-fn bottom_status_bar(ui: &mut egui::Ui, pane: &PaneState, location: &str) {
+fn bottom_status_bar(ui: &mut egui::Ui, pane: &PaneState) {
     let pane_summary = pane.pane_summary();
     let summary_text = pane_summary.format();
 
     let mut status_parts = vec![summary_text];
 
-    if let Some(free_space) = crate::fs::get_free_space(location) {
+    if let Some(free_space) = pane.cached_free_space {
         let free_label = crate::state::FileEntry::size_value_label(free_space);
         status_parts.push(format!("Free: {}", free_label));
     }
