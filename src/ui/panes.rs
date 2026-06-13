@@ -68,7 +68,8 @@ fn pane(
             header_row(ui);
             ui.separator();
 
-            let viewport_height = ui.available_height().max(0.0);
+            let bottom_reserve = ROW_HEIGHT + ui.spacing().item_spacing.y * 2.0 + 1.0;
+            let viewport_height = (ui.available_height() - bottom_reserve).max(0.0);
             let row_pitch = ENTRY_ROW_HEIGHT + ui.spacing().item_spacing.y;
             let row_layout = RowLayout::new(ui);
             let scroll_offset = if pane.needs_scroll_to_selected {
@@ -90,6 +91,7 @@ fn pane(
                     PaneSide::Right => "right_pane_entries",
                 })
                 .vertical_scroll_offset(scroll_offset)
+                .max_height(viewport_height)
                 .auto_shrink([false, false])
                 .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
                 .show_viewport(ui, |ui, viewport| {
