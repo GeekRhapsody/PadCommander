@@ -1470,12 +1470,13 @@ impl PaneState {
         let mut summary = PaneSummary::default();
 
         for entry in self.entries.iter() {
-            // Count only files and archives, not directories or special entries
             if matches!(entry.kind, FileEntryKind::File | FileEntryKind::Archive) {
                 summary.file_count += 1;
                 if let Some(size) = entry.size {
                     summary.total_size = summary.total_size.saturating_add(size);
                 }
+            } else if matches!(entry.kind, FileEntryKind::Directory) {
+                summary.folder_count += 1;
             }
         }
 
@@ -1751,13 +1752,19 @@ impl MarkedSummary {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PaneSummary {
     pub file_count: usize,
+    pub folder_count: usize,
     pub total_size: u64,
 }
 
 impl PaneSummary {
     pub fn format(&self) -> String {
         let size_label = FileEntry::size_value_label(self.total_size);
-        format!("{} file(s) | {size_label}", self.file_count)
+        let file_label = if self.file_count == 1 { "file" } else { "files" };
+        let folder_label = if self.folder_count == 1 { "folder" } else { "folders" };
+        format!(
+            "{} {}, {} {} | {size_label}",
+            self.file_count, file_label, self.folder_count, folder_label
+        )
     }
 }
 
