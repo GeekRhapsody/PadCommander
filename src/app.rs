@@ -64,5 +64,6 @@ fn configure_visuals(ctx: &egui::Context) {
     visuals.faint_bg_color = egui::Color32::from_rgb(37, 41, 42);
     visuals.selection.bg_fill = egui::Color32::from_rgb(66, 96, 89);
     visuals.hyperlink_color = egui::Color32::from_rgb(132, 184, 153);
+    visuals.override_text_color = Some(egui::Color32::WHITE);
     ctx.set_visuals(visuals);
 }

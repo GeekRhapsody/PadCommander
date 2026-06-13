@@ -305,7 +305,7 @@ fn paint_row_contents(
         format!("  {}", entry.display_name)
     };
     let text_color = if disabled {
-        egui::Color32::from_rgb(130, 136, 137)
+        egui::Color32::WHITE
     } else if selected {
         egui::Color32::WHITE
     } else {
