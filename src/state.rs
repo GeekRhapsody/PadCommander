@@ -2468,6 +2468,7 @@ const LOWERCASE_KEYS: &[&[OnScreenKey]] = &[
         OnScreenKey::Text("i"),
         OnScreenKey::Text("o"),
         OnScreenKey::Text("p"),
+        OnScreenKey::Backspace,
     ],
     &[
         OnScreenKey::Text("a"),
@@ -2489,14 +2490,13 @@ const LOWERCASE_KEYS: &[&[OnScreenKey]] = &[
         OnScreenKey::Text("b"),
         OnScreenKey::Text("n"),
         OnScreenKey::Text("m"),
-        OnScreenKey::Backspace,
+        OnScreenKey::Clear,
     ],
     &[
         OnScreenKey::Symbols,
         OnScreenKey::CursorLeft,
         OnScreenKey::Space,
         OnScreenKey::CursorRight,
-        OnScreenKey::Clear,
         OnScreenKey::Cancel,
         OnScreenKey::Confirm,
     ],
@@ -2514,6 +2514,7 @@ const UPPERCASE_KEYS: &[&[OnScreenKey]] = &[
         OnScreenKey::Text("I"),
         OnScreenKey::Text("O"),
         OnScreenKey::Text("P"),
+        OnScreenKey::Backspace,
     ],
     &[
         OnScreenKey::Text("A"),
@@ -2535,7 +2536,7 @@ const UPPERCASE_KEYS: &[&[OnScreenKey]] = &[
         OnScreenKey::Text("B"),
         OnScreenKey::Text("N"),
         OnScreenKey::Text("M"),
-        OnScreenKey::Backspace,
+        OnScreenKey::Clear,
     ],
     LOWERCASE_KEYS[3],
 ];
@@ -2552,6 +2553,7 @@ const SYMBOL_KEYS: &[&[OnScreenKey]] = &[
         OnScreenKey::Text("8"),
         OnScreenKey::Text("9"),
         OnScreenKey::Text("0"),
+        OnScreenKey::Backspace,
     ],
     &[
         OnScreenKey::Text("-"),
@@ -2573,7 +2575,7 @@ const SYMBOL_KEYS: &[&[OnScreenKey]] = &[
         OnScreenKey::Text("!"),
         OnScreenKey::Text("&"),
         OnScreenKey::Text(";"),
-        OnScreenKey::Backspace,
+        OnScreenKey::Clear,
     ],
     LOWERCASE_KEYS[3],
 ];
