@@ -382,7 +382,18 @@ impl TaskManager {
         target_directory: PathBuf,
     ) -> TaskId {
         self.spawn_threaded(TaskKind::Copy, label, true, move |reporter| {
-            local_transfer_task(reporter, LocalTransferKind::Copy, sources, target_directory)
+            local_transfer_task(reporter, LocalTransferKind::Copy, sources, target_directory, false)
+        })
+    }
+
+    pub fn spawn_copy_to_directory_overwrite(
+        &mut self,
+        label: String,
+        sources: Vec<PathBuf>,
+        target_directory: PathBuf,
+    ) -> TaskId {
+        self.spawn_threaded(TaskKind::Copy, label, true, move |reporter| {
+            local_transfer_task(reporter, LocalTransferKind::Copy, sources, target_directory, true)
         })
     }
 
@@ -393,7 +404,18 @@ impl TaskManager {
         target_directory: PathBuf,
     ) -> TaskId {
         self.spawn_threaded(TaskKind::Move, label, true, move |reporter| {
-            local_transfer_task(reporter, LocalTransferKind::Move, sources, target_directory)
+            local_transfer_task(reporter, LocalTransferKind::Move, sources, target_directory, false)
+        })
+    }
+
+    pub fn spawn_move_to_directory_overwrite(
+        &mut self,
+        label: String,
+        sources: Vec<PathBuf>,
+        target_directory: PathBuf,
+    ) -> TaskId {
+        self.spawn_threaded(TaskKind::Move, label, true, move |reporter| {
+            local_transfer_task(reporter, LocalTransferKind::Move, sources, target_directory, true)
         })
     }
 
@@ -811,12 +833,13 @@ fn local_transfer_task(
     kind: LocalTransferKind,
     sources: Vec<PathBuf>,
     target_directory: PathBuf,
+    overwrite: bool,
 ) -> TaskOutcome {
     if sources.is_empty() {
         return TaskOutcome::Failed("No items selected.".to_owned());
     }
 
-    let plan = match LocalTransferPlan::new(sources, target_directory) {
+    let plan = match LocalTransferPlan::new(sources, target_directory, overwrite) {
         Ok(plan) => plan,
         Err(error) => return TaskOutcome::Failed(error),
     };
@@ -873,7 +896,7 @@ struct LocalTransferPlan {
 }
 
 impl LocalTransferPlan {
-    fn new(sources: Vec<PathBuf>, target_directory: PathBuf) -> Result<Self, String> {
+    fn new(sources: Vec<PathBuf>, target_directory: PathBuf, overwrite: bool) -> Result<Self, String> {
         if !target_directory.is_dir() {
             return Err(format!(
                 "Target {} is not a directory.",
@@ -890,7 +913,7 @@ impl LocalTransferPlan {
                 .ok_or_else(|| format!("Cannot determine a name for {}.", source.display()))?;
             let target = target_directory.join(file_name);
 
-            if target.exists() {
+            if !overwrite && target.exists() {
                 return Err(format!("{} already exists.", target.display()));
             }
 
@@ -975,7 +998,7 @@ fn copy_path_recursive(
         .map_err(|error| format!("Cannot read {}: {error}", source.display()))?;
 
     if metadata.is_dir() {
-        std_fs::create_dir(target)
+        std_fs::create_dir_all(target)
             .map_err(|error| format!("Cannot create {}: {error}", target.display()))?;
         tracker.finish_item();
         reporter.progress(tracker.snapshot(source));
@@ -1013,7 +1036,8 @@ fn copy_file_with_progress(
         .map_err(|error| format!("Cannot open {}: {error}", source.display()))?;
     let mut output = std_fs::OpenOptions::new()
         .write(true)
-        .create_new(true)
+        .create(true)
+        .truncate(true)
         .open(target)
         .map_err(|error| format!("Cannot create {}: {error}", target.display()))?;
     let mut buffer = [0u8; 64 * 1024];

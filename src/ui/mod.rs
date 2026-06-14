@@ -8,7 +8,7 @@ use crate::{
     action::CommanderAction,
     app::APP_TITLE,
     settings,
-    state::{AppState, DialogState, SettingsModalFocus},
+    state::{AppState, DialogState, SettingsModalFocus, TransferConflictState},
 };
 
 pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<CommanderAction> {
@@ -67,6 +67,7 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
         DialogState::Message { .. }
         | DialogState::DeleteConfirm(_)
         | DialogState::ShortcutConflict(_)
+        | DialogState::TransferConflict(_)
         | DialogState::CommandMenu(_)
         | DialogState::Settings(_)
         | DialogState::Favourites(_)
@@ -150,6 +151,9 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 }
                                 ui.label("A / Enter overwrites. B / Esc cancels.");
                             });
+                        }
+                        DialogState::TransferConflict(conflict) => {
+                            render_transfer_conflict(ui, conflict, actions);
                         }
                         DialogState::CommandMenu(menu) => {
                             ui.heading("Command Menu");
@@ -436,4 +440,34 @@ fn panel_frame(fill: egui::Color32) -> egui::Frame {
     egui::Frame::new()
         .fill(fill)
         .inner_margin(egui::Margin::same(10))
+}
+
+fn render_transfer_conflict(
+    ui: &mut egui::Ui,
+    conflict: &TransferConflictState,
+    actions: &mut Vec<CommanderAction>,
+) {
+    let verb = match conflict.kind {
+        crate::tasks::TaskKind::Copy => "Copy",
+        crate::tasks::TaskKind::Move => "Move",
+        _ => "Transfer",
+    };
+    ui.heading(format!("{verb}: Item Already Exists"));
+    ui.label(format!(
+        "{} item(s) already exist in the target folder:",
+        conflict.conflicts.len()
+    ));
+    ui.label(conflict.conflict_examples());
+    ui.add_space(10.0);
+    ui.label("Overwrite the existing item(s) or cancel?");
+    ui.add_space(10.0);
+    ui.horizontal(|ui| {
+        if ui.button("Overwrite").clicked() {
+            actions.push(CommanderAction::Confirm);
+        }
+        if ui.button("Cancel").clicked() {
+            actions.push(CommanderAction::Cancel);
+        }
+        ui.label("A / Enter overwrites. B / Esc cancels.");
+    });
 }

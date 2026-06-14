@@ -573,6 +573,19 @@ impl AppState {
                 let confirm = confirm.clone();
                 self.start_create_shortcut(confirm.request, true);
             }
+            DialogState::TransferConflict(conflict) => {
+                let conflict = conflict.clone();
+                self.dialog = DialogState::None;
+                self.execute_transfer_task(
+                    conflict.kind,
+                    conflict.source_side,
+                    conflict.target_side,
+                    conflict.source_paths,
+                    conflict.target_directory,
+                    conflict.label,
+                    true,
+                );
+            }
             DialogState::CommandMenu(menu) => {
                 let action = menu.selected_action();
                 self.dialog = DialogState::None;
@@ -825,8 +838,57 @@ impl AppState {
             fs::location_label(&target_location)
         );
 
+        let conflicts: Vec<String> = source_paths
+            .iter()
+            .filter_map(|src| {
+                let name = src.file_name()?;
+                let target = target_directory.join(name);
+                if target.exists() {
+                    Some(name.to_string_lossy().into_owned())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if !conflicts.is_empty() {
+            self.dialog = DialogState::TransferConflict(TransferConflictState {
+                kind,
+                source_side,
+                target_side,
+                source_paths,
+                target_directory,
+                conflicts,
+                label,
+            });
+            return;
+        }
+
+        self.execute_transfer_task(kind, source_side, target_side, source_paths, target_directory, label, false);
+    }
+
+    fn execute_transfer_task(
+        &mut self,
+        kind: TaskKind,
+        source_side: PaneSide,
+        target_side: PaneSide,
+        source_paths: Vec<PathBuf>,
+        target_directory: PathBuf,
+        label: String,
+        overwrite: bool,
+    ) {
         let task_id = match kind {
+            TaskKind::Copy if overwrite => self.task_manager.spawn_copy_to_directory_overwrite(
+                label.clone(),
+                source_paths,
+                target_directory,
+            ),
             TaskKind::Copy => self.task_manager.spawn_copy_to_directory(
+                label.clone(),
+                source_paths,
+                target_directory,
+            ),
+            TaskKind::Move if overwrite => self.task_manager.spawn_move_to_directory_overwrite(
                 label.clone(),
                 source_paths,
                 target_directory,
@@ -1118,7 +1180,8 @@ impl AppState {
             | DialogState::Message { .. }
             | DialogState::TextInput(_)
             | DialogState::DeleteConfirm(_)
-            | DialogState::ShortcutConflict(_) => false,
+            | DialogState::ShortcutConflict(_)
+            | DialogState::TransferConflict(_) => false,
         }
     }
 
@@ -1366,6 +1429,7 @@ impl AppState {
             | DialogState::Message { .. }
             | DialogState::DeleteConfirm(_)
             | DialogState::ShortcutConflict(_)
+            | DialogState::TransferConflict(_)
             | DialogState::CommandMenu(_)
             | DialogState::Settings(_)
             | DialogState::Favourites(_)
@@ -1802,6 +1866,7 @@ pub enum DialogState {
     TextInput(TextInputDialogState),
     DeleteConfirm(DeleteConfirmationState),
     ShortcutConflict(ShortcutConflictState),
+    TransferConflict(TransferConflictState),
     CommandMenu(CommandMenuState),
     Settings(SettingsModalState),
     Favourites(FavouritesModalState),
@@ -2181,6 +2246,28 @@ impl DeleteConfirmationState {
             .iter()
             .take(5)
             .map(|entry| entry.display_name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransferConflictState {
+    pub kind: TaskKind,
+    pub source_side: PaneSide,
+    pub target_side: PaneSide,
+    pub source_paths: Vec<PathBuf>,
+    pub target_directory: PathBuf,
+    pub conflicts: Vec<String>,
+    pub label: String,
+}
+
+impl TransferConflictState {
+    pub fn conflict_examples(&self) -> String {
+        self.conflicts
+            .iter()
+            .take(3)
+            .map(|s| s.as_str())
             .collect::<Vec<_>>()
             .join(", ")
     }
