@@ -1093,10 +1093,20 @@ impl AppState {
 
     fn navigate_active_pane(&mut self, location: String) {
         let active_pane = self.active_pane;
+        let previous_location = self.pane(active_pane).current_location.clone();
         self.push_navigation_history(active_pane, &location);
         self.pane_mut(active_pane).current_location = location;
         self.remember_pane_location(active_pane);
         self.refresh_pane(active_pane);
+
+        if matches!(self.pane(active_pane).load_state, PaneLoadState::Error(_)) {
+            let error_status = self.status.clone();
+            self.pane_mut(active_pane).navigation_history.pop();
+            self.pane_mut(active_pane).current_location = previous_location.clone();
+            self.remember_pane_location(active_pane);
+            self.refresh_pane(active_pane);
+            self.status = error_status;
+        }
     }
 
     fn go_back(&mut self) {
