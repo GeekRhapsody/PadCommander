@@ -2444,9 +2444,8 @@ impl TextInputDialogState {
             }
             TextInputAction::ToggleSymbols => {
                 self.layer = match self.layer {
-                    KeyboardLayer::Lowercase => KeyboardLayer::Uppercase,
-                    KeyboardLayer::Uppercase => KeyboardLayer::Symbols,
                     KeyboardLayer::Symbols => KeyboardLayer::Lowercase,
+                    _ => KeyboardLayer::Symbols,
                 };
                 self.clamp_focus();
                 TextInputOutcome::Editing
@@ -2752,7 +2751,7 @@ const SYMBOL_KEYS: &[&[OnScreenKey]] = &[
         OnScreenKey::Text(")"),
     ],
     &[
-        OnScreenKey::Symbols,
+        OnScreenKey::Shift,
         OnScreenKey::Text("#"),
         OnScreenKey::Text("@"),
         OnScreenKey::Text("+"),

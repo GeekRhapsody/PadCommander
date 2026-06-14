@@ -385,6 +385,12 @@ fn action_for_button(
             Button::West => Some(CommanderAction::TextInput(TextInputAction::Backspace)),
             Button::North => Some(CommanderAction::TextInput(TextInputAction::ToggleSymbols)),
             Button::Start => Some(CommanderAction::TextInput(TextInputAction::Submit)),
+            Button::LeftTrigger => {
+                Some(CommanderAction::TextInput(TextInputAction::CursorLeft))
+            }
+            Button::RightTrigger => {
+                Some(CommanderAction::TextInput(TextInputAction::CursorRight))
+            }
             _ => None,
         };
     }

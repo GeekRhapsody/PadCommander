@@ -79,7 +79,9 @@ fn text_input_dialog(
         ui.separator();
         ui.label("X: backspace");
         ui.separator();
-        ui.label("Y: layer");
+        ui.label("Y: symbols");
+        ui.separator();
+        ui.label("LB/RB: cursor");
         ui.separator();
         ui.label("Start: confirm");
     });
@@ -91,7 +93,14 @@ fn on_screen_keyboard(
     actions: &mut Vec<CommanderAction>,
 ) {
     for (row_index, row) in dialog.keys().iter().enumerate() {
+        let item_spacing = ui.spacing().item_spacing.x;
+        let total_key_width: f32 = row.iter().map(|k| key_size(*k)[0]).sum();
+        let gaps = row.len().saturating_sub(1) as f32;
+        let row_width = total_key_width + gaps * item_spacing;
+        let padding = ((ui.available_width() - row_width) / 2.0).max(0.0);
+
         ui.horizontal(|ui| {
+            ui.add_space(padding);
             for (col_index, key) in row.iter().enumerate() {
                 let focused = dialog.focused_row == row_index && dialog.focused_col == col_index;
                 let mut button = egui::Button::new(key.label());
