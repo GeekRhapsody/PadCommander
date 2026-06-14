@@ -238,15 +238,19 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                             );
                             ui.add_space(10.0);
                             ui.add_space(8.0);
-                            settings_row(
-                                ui,
-                                settings_modal.focused_setting() == SettingsModalFocus::Quit,
-                                |ui| {
-                                    if ui.button("Quit App").clicked() {
-                                        actions.push(CommanderAction::QuitDevelopment);
-                                    }
-                                },
-                            );
+                            {
+                                let focused = settings_modal.focused_setting() == SettingsModalFocus::Quit;
+                                let mut button = egui::Button::new("Quit App")
+                                    .stroke(egui::Stroke::new(2.0, egui::Color32::TRANSPARENT));
+                                if focused {
+                                    button = button
+                                        .fill(egui::Color32::from_rgb(73, 104, 94))
+                                        .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE));
+                                }
+                                if ui.add_sized([260.0, 34.0], button).clicked() {
+                                    actions.push(CommanderAction::QuitDevelopment);
+                                }
+                            }
                             ui.label("D-pad/arrow keys choose and change settings. A / Enter toggles. B / Esc closes.");
                         }
                         DialogState::Favourites(favourites) => {
@@ -421,7 +425,9 @@ fn settings_row(ui: &mut egui::Ui, focused: bool, add_contents: impl FnOnce(&mut
             .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE))
             .inner_margin(egui::Margin::same(6))
     } else {
-        egui::Frame::new().inner_margin(egui::Margin::same(6))
+        egui::Frame::new()
+            .stroke(egui::Stroke::new(2.0, egui::Color32::TRANSPARENT))
+            .inner_margin(egui::Margin::same(6))
     };
 
     frame.show(ui, |ui| {
