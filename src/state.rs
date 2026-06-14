@@ -460,10 +460,45 @@ impl AppState {
                 self.navigate_active_pane(selected_entry.virtual_path);
             }
             FileEntryKind::File | FileEntryKind::Archive => {
-                self.status = format!(
-                    "{} is a file. Opening files is reserved for a future milestone.",
-                    selected_entry.display_name
-                );
+                let path = std::path::Path::new(&selected_entry.virtual_path);
+                let ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.to_ascii_lowercase());
+                let is_executable =
+                    matches!(ext.as_deref(), Some("exe" | "bat" | "cmd" | "com"));
+
+                if is_executable {
+                    let parent = path.parent().unwrap_or(path);
+                    match std::process::Command::new(path).current_dir(parent).spawn() {
+                        Ok(_) => {
+                            self.status =
+                                format!("Launched {}.", selected_entry.display_name);
+                        }
+                        Err(e) => {
+                            self.status = format!(
+                                "Failed to launch {}: {}",
+                                selected_entry.display_name, e
+                            );
+                        }
+                    }
+                } else {
+                    match std::process::Command::new("cmd")
+                        .args(["/c", "start", "", &selected_entry.virtual_path])
+                        .spawn()
+                    {
+                        Ok(_) => {
+                            self.status =
+                                format!("Opened {}.", selected_entry.display_name);
+                        }
+                        Err(e) => {
+                            self.status = format!(
+                                "Failed to open {}: {}",
+                                selected_entry.display_name, e
+                            );
+                        }
+                    }
+                }
             }
             FileEntryKind::FtpItem | FileEntryKind::Unknown => {
                 self.status = format!(
