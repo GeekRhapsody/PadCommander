@@ -1712,15 +1712,71 @@ pub struct FileEntry {
 }
 
 impl FileEntry {
-    pub fn kind_label(&self) -> &'static str {
+    pub fn type_display_label(&self) -> &'static str {
         match self.kind {
-            FileEntryKind::File => "File",
             FileEntryKind::Directory => "Directory",
             FileEntryKind::Drive => "Drive",
             FileEntryKind::Archive => "Archive",
             FileEntryKind::Parent => "Parent",
             FileEntryKind::FtpItem => "FTP",
             FileEntryKind::Unknown => "Unknown",
+            FileEntryKind::File => {
+                let ext = Path::new(&self.virtual_path)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.to_ascii_lowercase());
+                match ext.as_deref() {
+                    Some("png") => "PNG Image",
+                    Some("jpg") | Some("jpeg") => "JPEG Image",
+                    Some("gif") => "GIF Image",
+                    Some("bmp") => "Bitmap Image",
+                    Some("ico") => "Icon",
+                    Some("svg") => "SVG Image",
+                    Some("webp") => "WebP Image",
+                    Some("tiff") | Some("tif") => "TIFF Image",
+                    Some("pdf") => "PDF Document",
+                    Some("doc") => "Word Document",
+                    Some("docx") => "Word Document",
+                    Some("xls") => "Excel Sheet",
+                    Some("xlsx") => "Excel Sheet",
+                    Some("ppt") | Some("pptx") => "Presentation",
+                    Some("odt") => "ODF Document",
+                    Some("txt") => "Text File",
+                    Some("md") => "Markdown",
+                    Some("csv") => "CSV File",
+                    Some("json") => "JSON File",
+                    Some("xml") => "XML File",
+                    Some("yaml") | Some("yml") => "YAML File",
+                    Some("toml") => "TOML File",
+                    Some("ini") | Some("cfg") | Some("conf") => "Config File",
+                    Some("log") => "Log File",
+                    Some("rs") => "Rust Source",
+                    Some("c") => "C Source",
+                    Some("cpp") | Some("cxx") | Some("cc") => "C++ Source",
+                    Some("h") | Some("hpp") => "C/C++ Header",
+                    Some("py") => "Python Script",
+                    Some("js") => "JavaScript",
+                    Some("ts") => "TypeScript",
+                    Some("html") | Some("htm") => "HTML File",
+                    Some("css") => "CSS File",
+                    Some("sh") | Some("bash") => "Shell Script",
+                    Some("ps1") => "PowerShell Script",
+                    Some("bat") | Some("cmd") => "Batch Script",
+                    Some("lua") => "Lua Script",
+                    Some("exe") => "Executable",
+                    Some("dll") => "DLL Library",
+                    Some("so") => "Shared Library",
+                    Some("sys") => "System File",
+                    Some("mp3") | Some("flac") | Some("ogg") | Some("wav") | Some("aac") => {
+                        "Audio File"
+                    }
+                    Some("mp4") | Some("mkv") | Some("avi") | Some("mov") | Some("wmv") => {
+                        "Video File"
+                    }
+                    Some("ttf") | Some("otf") | Some("woff") | Some("woff2") => "Font File",
+                    _ => "File",
+                }
+            }
         }
     }
 

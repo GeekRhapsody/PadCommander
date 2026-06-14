@@ -3,9 +3,10 @@ use eframe::egui::{self, scroll_area::ScrollBarVisibility};
 use crate::{
     action::CommanderAction,
     state::{AppState, FileEntry, PaneLoadState, PaneSide, PaneState},
+    ui::icons,
 };
 
-const TYPE_COLUMN_WIDTH: f32 = 82.0;
+const TYPE_COLUMN_WIDTH: f32 = 110.0;
 const SIZE_COLUMN_WIDTH: f32 = 74.0;
 const MODIFIED_COLUMN_WIDTH: f32 = 90.0;
 const MIN_NAME_COLUMN_WIDTH: f32 = 120.0;
@@ -317,7 +318,7 @@ fn paint_row_contents(
     let name = if marked {
         format!("* {}", entry.display_name)
     } else {
-        format!("  {}", entry.display_name)
+        entry.display_name.clone()
     };
     let text_color = if disabled {
         egui::Color32::WHITE
@@ -332,11 +333,22 @@ fn paint_row_contents(
     let text_y = content_rect.center().y;
 
     let mut x = content_rect.left();
+
+    // Icon
+    let icon_gap = 4.0;
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(x + icons::ICON_SIZE / 2.0, text_y),
+        egui::vec2(icons::ICON_SIZE, icons::ICON_SIZE),
+    );
+    icons::paint_entry_icon(painter, icon_rect, entry);
+    let name_x = x + icons::ICON_SIZE + icon_gap;
+    let name_width = (layout.name_width - icons::ICON_SIZE - icon_gap).max(0.0);
+
     paint_cell_text(
         painter,
         egui::Rect::from_min_size(
-            egui::pos2(x, text_y - ROW_HEIGHT / 2.0),
-            egui::vec2(layout.name_width, ROW_HEIGHT),
+            egui::pos2(name_x, text_y - ROW_HEIGHT / 2.0),
+            egui::vec2(name_width, ROW_HEIGHT),
         ),
         &name,
         font_id.clone(),
@@ -351,7 +363,7 @@ fn paint_row_contents(
             egui::pos2(x, text_y - ROW_HEIGHT / 2.0),
             egui::vec2(TYPE_COLUMN_WIDTH, ROW_HEIGHT),
         ),
-        entry.kind_label(),
+        entry.type_display_label(),
         font_id.clone(),
         text_color,
         egui::Align2::CENTER_CENTER,
