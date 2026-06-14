@@ -335,7 +335,7 @@ fn paint_row_contents(
     let mut x = content_rect.left();
 
     // Icon
-    let icon_gap = 4.0;
+    let icon_gap = 5.0;
     let icon_rect = egui::Rect::from_center_size(
         egui::pos2(x + icons::ICON_SIZE / 2.0, text_y),
         egui::vec2(icons::ICON_SIZE, icons::ICON_SIZE),
@@ -344,7 +344,8 @@ fn paint_row_contents(
     let name_x = x + icons::ICON_SIZE + icon_gap;
     let name_width = (layout.name_width - icons::ICON_SIZE - icon_gap).max(0.0);
 
-    paint_cell_text(
+    paint_cell_text_elided(
+        ui,
         painter,
         egui::Rect::from_min_size(
             egui::pos2(name_x, text_y - ROW_HEIGHT / 2.0),
@@ -353,7 +354,6 @@ fn paint_row_contents(
         &name,
         font_id.clone(),
         text_color,
-        egui::Align2::LEFT_CENTER,
     );
     x += layout.name_width + layout.spacing;
 
@@ -434,6 +434,36 @@ fn paint_modified_cell_text(
         font_id,
         color,
     );
+}
+
+fn paint_cell_text_elided(
+    ui: &egui::Ui,
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    text: &str,
+    font_id: egui::FontId,
+    color: egui::Color32,
+) {
+    let galley = ui.ctx().fonts_mut(|f| {
+        let mut job = egui::text::LayoutJob::single_section(
+            text.to_string(),
+            egui::TextFormat {
+                font_id,
+                color,
+                ..Default::default()
+            },
+        );
+        job.wrap = egui::text::TextWrapping {
+            max_width: rect.width(),
+            max_rows: 1,
+            break_anywhere: true,
+            overflow_character: Some('…'),
+        };
+        f.layout_job(job)
+    });
+    painter
+        .with_clip_rect(rect)
+        .galley(rect.left_center() - egui::vec2(0.0, galley.size().y / 2.0), galley, color);
 }
 
 fn paint_cell_text(
