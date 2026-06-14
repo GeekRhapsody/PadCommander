@@ -1,4 +1,4 @@
-use eframe::egui::{self, scroll_area::ScrollBarVisibility};
+use eframe::egui;
 
 use crate::{
     action::CommanderAction,
@@ -73,7 +73,12 @@ fn pane(
             let viewport_height = (ui.available_height() - bottom_reserve).max(0.0);
             let row_pitch = ENTRY_ROW_HEIGHT + ui.spacing().item_spacing.y;
             let row_layout = RowLayout::new(ui);
-            let scroll_offset = if pane.needs_scroll_to_selected {
+            let total_content_height =
+                (row_pitch * pane.entries.len() as f32 - ui.spacing().item_spacing.y).max(0.0);
+            let max_scroll = (total_content_height - viewport_height).max(0.0);
+
+            // Start from state; apply scroll-to-selected if needed.
+            let mut scroll_offset = if pane.needs_scroll_to_selected {
                 scroll_offset_to_make_row_visible(
                     pane.selected_index,
                     pane.entries.len(),
@@ -86,40 +91,126 @@ fn pane(
                 pane.scroll_offset
             };
 
-            let output = egui::ScrollArea::vertical()
-                .id_salt(match side {
-                    PaneSide::Left => "left_pane_entries",
-                    PaneSide::Right => "right_pane_entries",
-                })
-                .vertical_scroll_offset(scroll_offset)
-                .max_height(viewport_height)
-                .auto_shrink([false, false])
-                .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
-                .show_viewport(ui, |ui, viewport| {
-                    show_visible_rows(ui, pane, is_active, viewport, row_pitch, row_layout);
-                });
-
-            let offset = output.state.offset.y.round() as i32;
-            let row_response = ui.interact(
-                output.inner_rect,
-                ui.make_persistent_id(match side {
-                    PaneSide::Left => "left_pane_entry_click_target",
-                    PaneSide::Right => "right_pane_entry_click_target",
-                }),
-                egui::Sense::click(),
+            // Geometry: content area + scrollbar side by side.
+            const SCROLLBAR_WIDTH: f32 = 8.0;
+            const SCROLLBAR_GAP: f32 = 4.0;
+            let area_rect = egui::Rect::from_min_size(
+                ui.cursor().min,
+                egui::vec2(ui.available_width(), viewport_height),
             );
+            let needs_scrollbar = max_scroll > 0.0;
+            let content_width = if needs_scrollbar {
+                (area_rect.width() - SCROLLBAR_WIDTH - SCROLLBAR_GAP).max(0.0)
+            } else {
+                area_rect.width()
+            };
+            let viewport_rect =
+                egui::Rect::from_min_size(area_rect.min, egui::vec2(content_width, viewport_height));
+            let scrollbar_rect = egui::Rect::from_min_size(
+                area_rect.min + egui::vec2(content_width + SCROLLBAR_GAP, 0.0),
+                egui::vec2(SCROLLBAR_WIDTH, viewport_height),
+            );
+
+            // Reserve the full area in the parent layout so the cursor advances.
+            ui.allocate_rect(area_rect, egui::Sense::hover());
+
+            // Mouse wheel scrolling when pointer is anywhere over the pane area.
+            if ui.rect_contains_pointer(area_rect) {
+                scroll_offset -= ui.input(|i| i.smooth_scroll_delta.y);
+            }
+
+            // Scrollbar thumb drag.
+            if needs_scrollbar {
+                let thumb_frac = (viewport_height / total_content_height).min(1.0);
+                let thumb_height = (thumb_frac * viewport_height).clamp(20.0, viewport_height);
+                let track_range = (viewport_height - thumb_height).max(1.0);
+                let thumb_top =
+                    (scroll_offset / max_scroll * track_range).clamp(0.0, track_range);
+                let thumb_rect = egui::Rect::from_min_size(
+                    scrollbar_rect.min + egui::vec2(0.0, thumb_top),
+                    egui::vec2(SCROLLBAR_WIDTH, thumb_height),
+                );
+
+                let thumb_id = ui.id().with(match side {
+                    PaneSide::Left => "left_scrollbar_thumb",
+                    PaneSide::Right => "right_scrollbar_thumb",
+                });
+                let thumb_response =
+                    ui.interact(thumb_rect, thumb_id, egui::Sense::click_and_drag());
+                if thumb_response.dragged() {
+                    scroll_offset += thumb_response.drag_delta().y * max_scroll / track_range;
+                }
+
+                // Clamp before computing final thumb position for painting.
+                scroll_offset = scroll_offset.clamp(0.0, max_scroll);
+                let thumb_top =
+                    (scroll_offset / max_scroll * track_range).clamp(0.0, track_range);
+                let thumb_rect = egui::Rect::from_min_size(
+                    scrollbar_rect.min + egui::vec2(0.0, thumb_top),
+                    egui::vec2(SCROLLBAR_WIDTH, thumb_height),
+                );
+
+                let painter = ui.painter();
+                painter.rect_filled(
+                    scrollbar_rect,
+                    3.0,
+                    egui::Color32::from_rgb(44, 47, 50),
+                );
+                let thumb_color = if thumb_response.is_pointer_button_down_on()
+                    || thumb_response.dragged()
+                {
+                    egui::Color32::from_rgb(120, 130, 135)
+                } else if thumb_response.hovered() {
+                    egui::Color32::from_rgb(100, 110, 115)
+                } else {
+                    egui::Color32::from_rgb(75, 82, 86)
+                };
+                painter.rect_filled(thumb_rect, 3.0, thumb_color);
+            }
+
+            // Clamp final scroll offset.
+            scroll_offset = scroll_offset.clamp(0.0, max_scroll);
+
+            // Render visible rows into a child UI clipped to the viewport.
+            {
+                let content_origin = egui::pos2(viewport_rect.left(), viewport_rect.top() - scroll_offset);
+                let content_max_rect = egui::Rect::from_min_size(
+                    content_origin,
+                    egui::vec2(content_width, total_content_height),
+                );
+                let clip_rect = viewport_rect.intersect(ui.clip_rect());
+                let mut content_ui = ui.new_child(
+                    egui::UiBuilder::new().max_rect(content_max_rect),
+                );
+                content_ui.set_clip_rect(clip_rect);
+                let viewport_in_content = egui::Rect::from_min_size(
+                    egui::pos2(0.0, scroll_offset),
+                    egui::vec2(content_width, viewport_height),
+                );
+                show_visible_rows(
+                    &mut content_ui,
+                    pane,
+                    is_active,
+                    viewport_in_content,
+                    row_pitch,
+                    row_layout,
+                );
+            }
+
+            // Click-to-select.
+            let click_id = ui.id().with(match side {
+                PaneSide::Left => "left_pane_entry_click_target",
+                PaneSide::Right => "right_pane_entry_click_target",
+            });
+            let row_response = ui.interact(viewport_rect, click_id, egui::Sense::click());
             if row_response.clicked()
                 && let Some(index) =
-                    clicked_row_index(ui, &row_response, offset, pane.entries.len())
+                    clicked_row_index(ui, &row_response, scroll_offset.round() as i32, pane.entries.len())
             {
                 actions.push(CommanderAction::SelectEntry { pane: side, index });
             }
 
-            if pane.needs_scroll_to_selected {
-                actions.push(CommanderAction::PaneScrollToSelectedIssued { pane: side, offset });
-            } else if offset != pane.scroll_offset.round() as i32 {
-                actions.push(CommanderAction::UpdatePaneScrollOffset { pane: side, offset });
-            }
+            actions.push(CommanderAction::SetPaneScrollOffset { pane: side, offset: scroll_offset.round() as i32 });
 
             ui.separator();
             bottom_status_bar(ui, pane);

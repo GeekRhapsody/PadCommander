@@ -181,13 +181,7 @@ impl AppState {
             CommanderAction::GoParent => {
                 self.go_parent(self.active_pane);
             }
-            CommanderAction::UpdatePaneScrollOffset { pane, offset } => {
-                let pane = self.pane_mut(pane);
-                if !pane.needs_scroll_to_selected {
-                    pane.scroll_offset = offset.max(0) as f32;
-                }
-            }
-            CommanderAction::PaneScrollToSelectedIssued { pane, offset } => {
+            CommanderAction::SetPaneScrollOffset { pane, offset } => {
                 let pane = self.pane_mut(pane);
                 pane.scroll_offset = offset.max(0) as f32;
                 pane.needs_scroll_to_selected = false;
@@ -3445,20 +3439,12 @@ mod tests {
     }
 
     #[test]
-    fn stale_scroll_offset_updates_do_not_override_pending_selection_scroll() {
+    fn set_pane_scroll_offset_updates_offset_and_clears_scroll_to_selected() {
         let mut state = test_state();
         state.left_pane.scroll_offset = 0.0;
         state.left_pane.needs_scroll_to_selected = true;
 
-        state.dispatch_action(CommanderAction::UpdatePaneScrollOffset {
-            pane: PaneSide::Left,
-            offset: 500,
-        });
-
-        assert_eq!(state.left_pane.scroll_offset, 0.0);
-        assert!(state.left_pane.needs_scroll_to_selected);
-
-        state.dispatch_action(CommanderAction::PaneScrollToSelectedIssued {
+        state.dispatch_action(CommanderAction::SetPaneScrollOffset {
             pane: PaneSide::Left,
             offset: 76,
         });
