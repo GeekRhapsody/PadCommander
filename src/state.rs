@@ -616,14 +616,26 @@ impl AppState {
         match &self.dialog {
             DialogState::TextInput(_) => self.handle_text_input(TextInputAction::Submit),
             DialogState::DeleteConfirm(confirm) => {
+                if confirm.focused_index == 1 {
+                    self.dialog = DialogState::None;
+                    return DispatchResult::default();
+                }
                 let confirm = confirm.clone();
                 self.start_delete_task(confirm);
             }
             DialogState::ShortcutConflict(confirm) => {
+                if confirm.focused_index == 1 {
+                    self.dialog = DialogState::None;
+                    return DispatchResult::default();
+                }
                 let confirm = confirm.clone();
                 self.start_create_shortcut(confirm.request, true);
             }
             DialogState::TransferConflict(conflict) => {
+                if conflict.focused_index == 1 {
+                    self.dialog = DialogState::None;
+                    return DispatchResult::default();
+                }
                 let conflict = conflict.clone();
                 self.dialog = DialogState::None;
                 self.execute_transfer_task(
@@ -743,6 +755,7 @@ impl AppState {
         self.dialog = DialogState::DeleteConfirm(DeleteConfirmationState {
             pane: self.active_pane,
             items,
+            focused_index: 0,
         });
         self.status = "Delete confirmation opened.".to_owned();
     }
@@ -819,7 +832,7 @@ impl AppState {
 
         let request = pending.into_shortcut_request(shortcut_name_with_default_extension(&value));
         if request.shortcut_path.exists() {
-            self.dialog = DialogState::ShortcutConflict(ShortcutConflictState { request });
+            self.dialog = DialogState::ShortcutConflict(ShortcutConflictState { request, focused_index: 0 });
             self.status = "Shortcut already exists.".to_owned();
         } else {
             self.start_create_shortcut(request, false);
@@ -840,7 +853,7 @@ impl AppState {
 
     fn start_create_shortcut(&mut self, request: ShortcutRequest, overwrite: bool) {
         if request.shortcut_path.exists() && !overwrite {
-            self.dialog = DialogState::ShortcutConflict(ShortcutConflictState { request });
+            self.dialog = DialogState::ShortcutConflict(ShortcutConflictState { request, focused_index: 0 });
             self.status = "Shortcut already exists.".to_owned();
             return;
         }
@@ -919,6 +932,7 @@ impl AppState {
                 target_directory,
                 conflicts,
                 label,
+                focused_index: 0,
             });
             return;
         }
@@ -1244,12 +1258,21 @@ impl AppState {
                 sort_by.move_focus(movement);
                 true
             }
+            DialogState::DeleteConfirm(confirm) => {
+                confirm.move_focus(movement);
+                true
+            }
+            DialogState::ShortcutConflict(conflict) => {
+                conflict.move_focus(movement);
+                true
+            }
+            DialogState::TransferConflict(conflict) => {
+                conflict.move_focus(movement);
+                true
+            }
             DialogState::None
             | DialogState::Message { .. }
             | DialogState::TextInput(_)
-            | DialogState::DeleteConfirm(_)
-            | DialogState::ShortcutConflict(_)
-            | DialogState::TransferConflict(_)
             | DialogState::OperationProgress(_) => false,
         }
     }
@@ -2300,6 +2323,7 @@ impl CommandMenuEntry {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ShortcutConflictState {
     request: ShortcutRequest,
+    pub focused_index: usize,
 }
 
 impl ShortcutConflictState {
@@ -2309,6 +2333,13 @@ impl ShortcutConflictState {
 
     pub fn target_path(&self) -> &Path {
         &self.request.target_path
+    }
+
+    pub fn move_focus(&mut self, movement: SelectionMovement) {
+        self.focused_index = match movement {
+            SelectionMovement::Up | SelectionMovement::PageUp | SelectionMovement::Home => 0,
+            SelectionMovement::Down | SelectionMovement::PageDown | SelectionMovement::End => 1,
+        };
     }
 }
 
@@ -2361,6 +2392,7 @@ struct ShortcutRequest {
 pub struct DeleteConfirmationState {
     pub pane: PaneSide,
     pub items: Vec<FileEntry>,
+    pub focused_index: usize,
 }
 
 impl DeleteConfirmationState {
@@ -2376,6 +2408,13 @@ impl DeleteConfirmationState {
             .collect::<Vec<_>>()
             .join(", ")
     }
+
+    pub fn move_focus(&mut self, movement: SelectionMovement) {
+        self.focused_index = match movement {
+            SelectionMovement::Up | SelectionMovement::PageUp | SelectionMovement::Home => 0,
+            SelectionMovement::Down | SelectionMovement::PageDown | SelectionMovement::End => 1,
+        };
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2387,6 +2426,7 @@ pub struct TransferConflictState {
     pub target_directory: PathBuf,
     pub conflicts: Vec<String>,
     pub label: String,
+    pub focused_index: usize,
 }
 
 impl TransferConflictState {
@@ -2397,6 +2437,13 @@ impl TransferConflictState {
             .map(|s| s.as_str())
             .collect::<Vec<_>>()
             .join(", ")
+    }
+
+    pub fn move_focus(&mut self, movement: SelectionMovement) {
+        self.focused_index = match movement {
+            SelectionMovement::Up | SelectionMovement::PageUp | SelectionMovement::Home => 0,
+            SelectionMovement::Down | SelectionMovement::PageDown | SelectionMovement::End => 1,
+        };
     }
 }
 

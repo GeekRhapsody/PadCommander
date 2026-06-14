@@ -103,30 +103,42 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                             ui.label(message);
                         }
                         DialogState::DeleteConfirm(confirm) => {
+                            let count = confirm.item_count();
+                            let items_label = if count == 1 { "item" } else { "item(s)" };
                             if state.settings.use_recycle_bin {
                                 ui.heading("Delete to Recycle Bin");
                                 ui.label(format!(
-                                    "Move {} item(s) to the Recycle Bin?",
-                                    confirm.item_count()
+                                    "Move {} {} to the Recycle Bin?",
+                                    count, items_label
                                 ));
                             } else {
                                 ui.heading("Permanently Delete");
                                 ui.label(format!(
-                                    "Permanently delete {} item(s)?",
-                                    confirm.item_count()
+                                    "Permanently delete {} {}?",
+                                    count, items_label
                                 ));
                             }
-                            ui.label(format!("Examples: {}", confirm.examples()));
-                            ui.add_space(10.0);
-                            ui.horizontal(|ui| {
-                                if ui.button("Delete").clicked() {
-                                    actions.push(CommanderAction::Confirm);
+                            let examples_label = if count == 1 { "File" } else { "Examples" };
+                            ui.label(format!("{}: {}", examples_label, confirm.examples()));
+                            ui.add_space(8.0);
+                            for (index, label) in ["Delete", "Cancel"].iter().enumerate() {
+                                let focused = index == confirm.focused_index;
+                                let mut button = egui::Button::new(*label);
+                                if focused {
+                                    button = button
+                                        .fill(egui::Color32::from_rgb(73, 104, 94))
+                                        .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE));
                                 }
-                                if ui.button("Cancel").clicked() {
-                                    actions.push(CommanderAction::Cancel);
+                                if ui.add_sized([ui.available_width(), 34.0], button).clicked() {
+                                    if index == 0 {
+                                        actions.push(CommanderAction::Confirm);
+                                    } else {
+                                        actions.push(CommanderAction::Cancel);
+                                    }
                                 }
-                                ui.label("A / Enter confirms. B / Esc cancels.");
-                            });
+                            }
+                            ui.add_space(8.0);
+                            ui.label("D-pad moves. A selects. B cancels.");
                         }
                         DialogState::ShortcutConflict(confirm) => {
                             ui.heading("Overwrite Shortcut");
@@ -138,16 +150,25 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 "Target: {}",
                                 confirm.target_path().display()
                             ));
-                            ui.add_space(10.0);
-                            ui.horizontal(|ui| {
-                                if ui.button("Overwrite").clicked() {
-                                    actions.push(CommanderAction::Confirm);
+                            ui.add_space(8.0);
+                            for (index, label) in ["Overwrite", "Cancel"].iter().enumerate() {
+                                let focused = index == confirm.focused_index;
+                                let mut button = egui::Button::new(*label);
+                                if focused {
+                                    button = button
+                                        .fill(egui::Color32::from_rgb(73, 104, 94))
+                                        .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE));
                                 }
-                                if ui.button("Cancel").clicked() {
-                                    actions.push(CommanderAction::Cancel);
+                                if ui.add_sized([ui.available_width(), 34.0], button).clicked() {
+                                    if index == 0 {
+                                        actions.push(CommanderAction::Confirm);
+                                    } else {
+                                        actions.push(CommanderAction::Cancel);
+                                    }
                                 }
-                                ui.label("A / Enter overwrites. B / Esc cancels.");
-                            });
+                            }
+                            ui.add_space(8.0);
+                            ui.label("D-pad moves. A selects. B cancels.");
                         }
                         DialogState::TransferConflict(conflict) => {
                             render_transfer_conflict(ui, conflict, actions);
@@ -551,16 +572,25 @@ fn render_transfer_conflict(
         conflict.conflicts.len()
     ));
     ui.label(conflict.conflict_examples());
-    ui.add_space(10.0);
+    ui.add_space(8.0);
     ui.label("Overwrite the existing item(s) or cancel?");
-    ui.add_space(10.0);
-    ui.horizontal(|ui| {
-        if ui.button("Overwrite").clicked() {
-            actions.push(CommanderAction::Confirm);
+    ui.add_space(8.0);
+    for (index, label) in ["Overwrite", "Cancel"].iter().enumerate() {
+        let focused = index == conflict.focused_index;
+        let mut button = egui::Button::new(*label);
+        if focused {
+            button = button
+                .fill(egui::Color32::from_rgb(73, 104, 94))
+                .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE));
         }
-        if ui.button("Cancel").clicked() {
-            actions.push(CommanderAction::Cancel);
+        if ui.add_sized([ui.available_width(), 34.0], button).clicked() {
+            if index == 0 {
+                actions.push(CommanderAction::Confirm);
+            } else {
+                actions.push(CommanderAction::Cancel);
+            }
         }
-        ui.label("A / Enter overwrites. B / Esc cancels.");
-    });
+    }
+    ui.add_space(8.0);
+    ui.label("D-pad moves. A selects. B cancels.");
 }
