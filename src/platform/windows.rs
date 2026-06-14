@@ -91,6 +91,39 @@ pub fn delete_to_recycle_bin(_paths: &[PathBuf]) -> Result<(), String> {
 }
 
 #[cfg(windows)]
+pub fn open_with_default_app(path: &std::path::Path) -> Result<(), String> {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+
+    let mut file: Vec<u16> = path.as_os_str().to_string_lossy().encode_utf16().collect();
+    file.push(0);
+    let operation: Vec<u16> = "open\0".encode_utf16().collect();
+
+    // SAFETY: ShellExecuteW receives valid null-terminated UTF-16 strings.
+    // hwnd is null (no owner window), parameters and directory are null.
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1, // SW_SHOWNORMAL
+        )
+    };
+
+    if result as usize > 32 {
+        Ok(())
+    } else {
+        Err(format!("ShellExecuteW failed with code {:?}.", result))
+    }
+}
+
+#[cfg(not(windows))]
+pub fn open_with_default_app(_path: &std::path::Path) -> Result<(), String> {
+    Err("Opening files is only supported on Windows.".to_owned())
+}
+
+#[cfg(windows)]
 pub fn create_shortcut(
     target_path: &std::path::Path,
     shortcut_path: &std::path::Path,

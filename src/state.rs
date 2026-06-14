@@ -483,11 +483,8 @@ impl AppState {
                         }
                     }
                 } else {
-                    match std::process::Command::new("cmd")
-                        .args(["/c", "start", "", &selected_entry.virtual_path])
-                        .spawn()
-                    {
-                        Ok(_) => {
+                    match windows::open_with_default_app(path) {
+                        Ok(()) => {
                             self.status =
                                 format!("Opened {}.", selected_entry.display_name);
                         }
