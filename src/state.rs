@@ -139,8 +139,10 @@ impl AppState {
                 self.status = format!("{} pane active.", self.active_pane_label());
             }
             CommanderAction::SwitchPane => {
-                self.switch_active_pane();
-                self.status = format!("{} pane active.", self.active_pane_label());
+                if !matches!(self.dialog, DialogState::CommandMenu(_)) {
+                    self.switch_active_pane();
+                    self.status = format!("{} pane active.", self.active_pane_label());
+                }
             }
             CommanderAction::MoveSelectionUp => {
                 if self.move_command_menu_focus(SelectionMovement::Up) {
