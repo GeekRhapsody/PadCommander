@@ -327,12 +327,8 @@ impl TaskManager {
         }
     }
 
-    pub fn visible_tasks(&self) -> Vec<&TaskProgress> {
-        self.queue.visible_tasks()
-    }
-
-    pub fn active_task(&self) -> Option<&TaskProgress> {
-        self.queue.active_task()
+    pub fn task_by_id(&self, id: TaskId) -> Option<&TaskProgress> {
+        self.queue.task_by_id(id)
     }
 
     pub fn spawn_threaded<F>(
@@ -515,13 +511,6 @@ impl TaskQueue {
         self.tasks.insert(task.id, task);
     }
 
-    pub fn visible_tasks(&self) -> Vec<&TaskProgress> {
-        self.order
-            .iter()
-            .filter_map(|id| self.tasks.get(id))
-            .collect()
-    }
-
     pub fn active_task(&self) -> Option<&TaskProgress> {
         self.order
             .iter()
@@ -541,6 +530,10 @@ impl TaskQueue {
             .values()
             .filter(|task| task.status == TaskStatus::Failed)
             .count()
+    }
+
+    pub fn task_by_id(&self, id: TaskId) -> Option<&TaskProgress> {
+        self.tasks.get(&id)
     }
 
     pub fn is_active(&self, id: TaskId) -> bool {

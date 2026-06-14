@@ -1,6 +1,5 @@
 pub mod icons;
 pub mod panes;
-pub mod progress;
 pub mod text_input;
 
 use eframe::egui;
@@ -10,6 +9,7 @@ use crate::{
     app::APP_TITLE,
     settings,
     state::{AppState, DialogState, SettingsModalFocus, TransferConflictState},
+    tasks::{TaskId, TaskStatus},
 };
 
 pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<CommanderAction> {
@@ -19,11 +19,6 @@ pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<CommanderAction> {
         .exact_size(64.0)
         .frame(panel_frame(egui::Color32::from_rgb(31, 35, 34)))
         .show_inside(ui, |ui| header(ui, state));
-
-    egui::Panel::bottom("task_progress")
-        .exact_size(118.0)
-        .frame(panel_frame(egui::Color32::from_rgb(25, 29, 30)))
-        .show_inside(ui, |ui| progress::show(ui, state, &mut actions));
 
     egui::CentralPanel::default()
         .frame(panel_frame(egui::Color32::from_rgb(20, 22, 23)))
@@ -73,7 +68,8 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
         | DialogState::Settings(_)
         | DialogState::Favourites(_)
         | DialogState::Decompress(_)
-        | DialogState::SortBy(_) => &state.dialog,
+        | DialogState::SortBy(_)
+        | DialogState::OperationProgress(_) => &state.dialog,
         DialogState::None | DialogState::TextInput(_) => return,
     };
 
@@ -100,7 +96,7 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                 ))
                 .inner_margin(egui::Margin::same(16))
                 .show(ui, |ui| {
-                    ui.set_min_width(360.0);
+                    ui.set_min_width(480.0);
                     match dialog {
                         DialogState::Message { title, message } => {
                             ui.heading(title);
@@ -336,10 +332,100 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                             ui.add_space(8.0);
                             ui.label("D-pad/arrow keys move. A / Enter selects. B / Esc cancels.");
                         }
+                        DialogState::OperationProgress(task_id) => {
+                            render_operation_progress(ui, state, *task_id, actions);
+                        }
                         DialogState::None | DialogState::TextInput(_) => {}
                     }
                 });
         });
+}
+
+fn render_operation_progress(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    task_id: TaskId,
+    actions: &mut Vec<CommanderAction>,
+) {
+    let Some(task) = state.task_manager.task_by_id(task_id) else {
+        ui.heading("Operation");
+        ui.label("Loading...");
+        return;
+    };
+
+    let done = task.status.is_finished();
+
+    // Title row: kind + status
+    ui.horizontal(|ui| {
+        ui.heading(task.kind.label());
+        if done {
+            let status_color = match task.status {
+                TaskStatus::Succeeded => egui::Color32::from_rgb(132, 184, 153),
+                TaskStatus::Failed => egui::Color32::LIGHT_RED,
+                TaskStatus::Cancelled => egui::Color32::from_rgb(220, 184, 110),
+                _ => egui::Color32::WHITE,
+            };
+            ui.colored_label(status_color, format!("— {}", task.status.label()));
+        }
+    });
+
+    // Task title (source/destination description)
+    ui.add(egui::Label::new(&task.title).truncate());
+    ui.add_space(8.0);
+
+    // Progress bar — always shown; uses helpers from TaskProgress
+    ui.add(
+        egui::ProgressBar::new(task.progress_fraction())
+            .desired_width(448.0)
+            .text(task.progress_label()),
+    );
+
+    // Detail line: current file or error or counts
+    ui.add_space(4.0);
+    let detail = task.detail_label();
+    let detail_color = if task.status == TaskStatus::Failed {
+        egui::Color32::LIGHT_RED
+    } else {
+        egui::Color32::GRAY
+    };
+    ui.add(egui::Label::new(egui::RichText::new(&detail).color(detail_color)).truncate());
+
+    // Byte / item counts
+    if task.total_bytes.is_some() || task.total_items.is_some() {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(total) = task.total_items {
+            parts.push(format!("{} of {} items", task.items_done, total));
+        }
+        if let Some(total) = task.total_bytes {
+            parts.push(format!(
+                "{} / {} MB",
+                task.bytes_done / 1_048_576,
+                total / 1_048_576
+            ));
+        }
+        if !parts.is_empty() {
+            ui.label(parts.join("  ·  "));
+        }
+    }
+
+    ui.add_space(12.0);
+    ui.horizontal(|ui| {
+        if done {
+            if ui.button("Close").clicked() {
+                actions.push(CommanderAction::Confirm);
+            }
+            ui.label("A / Enter closes.");
+        } else if task.cancellable {
+            if task.cancellation_requested {
+                ui.add_enabled(false, egui::Button::new("Cancelling..."));
+            } else {
+                if ui.button("Cancel").clicked() {
+                    actions.push(CommanderAction::CancelActiveTask);
+                }
+                ui.label("B / Esc cancels.");
+            }
+        }
+    });
 }
 
 fn input_help_overlay(ctx: &egui::Context, state: &AppState) {

@@ -208,6 +208,16 @@ impl AppState {
                     self.status = "Input help closed.".to_owned();
                 } else if self.text_dialog_is_open() {
                     self.handle_text_input(TextInputAction::Cancel);
+                } else if let DialogState::OperationProgress(task_id) = self.dialog {
+                    let done = self
+                        .task_manager
+                        .task_by_id(task_id)
+                        .map_or(true, |t| t.status.is_finished());
+                    if done {
+                        self.dialog = DialogState::None;
+                    } else {
+                        self.cancel_active_task();
+                    }
                 } else if self.dialog != DialogState::None {
                     self.dialog = DialogState::None;
                     self.status = "Cancelled.".to_owned();
@@ -345,40 +355,46 @@ impl AppState {
 
     pub fn poll_tasks(&mut self) {
         for completion in self.task_manager.poll_completed() {
+            let modal_is_showing = matches!(self.dialog, DialogState::OperationProgress(id) if id == completion.id);
+
             if let Some(context) = self.delete_tasks.remove(&completion.id) {
                 self.refresh_pane(context.pane);
-                match completion.result {
-                    Ok(data) if completion.status == TaskStatus::Succeeded => {
-                        self.status = context.mode.success_message(data.item_count);
+                if !modal_is_showing {
+                    match completion.result {
+                        Ok(data) if completion.status == TaskStatus::Succeeded => {
+                            self.status = context.mode.success_message(data.item_count);
+                        }
+                        Err(error) => {
+                            self.status = if completion.status == TaskStatus::Cancelled {
+                                format!("{} cancelled.", completion.label)
+                            } else {
+                                format!("{} failed: {error}", completion.label)
+                            };
+                        }
+                        Ok(_) => {}
                     }
-                    Err(error) => {
-                        self.status = if completion.status == TaskStatus::Cancelled {
-                            format!("{} cancelled.", completion.label)
-                        } else {
-                            format!("{} failed: {error}", completion.label)
-                        };
-                    }
-                    Ok(_) => {}
                 }
             } else if let Some(sides) = self.transfer_task_panes.remove(&completion.id) {
                 for side in sides {
                     self.refresh_pane(side);
                 }
 
-                match completion.status {
-                    TaskStatus::Succeeded => {
-                        self.status = format!("{} completed.", completion.label);
+                if !modal_is_showing {
+                    match completion.status {
+                        TaskStatus::Succeeded => {
+                            self.status = format!("{} completed.", completion.label);
+                        }
+                        TaskStatus::Failed => {
+                            let error = completion.error_message().unwrap_or("unknown error");
+                            self.status = format!("{} failed: {error}", completion.label);
+                        }
+                        TaskStatus::Cancelled => {
+                            self.status = format!("{} cancelled.", completion.label);
+                        }
+                        TaskStatus::Queued | TaskStatus::Running => {}
                     }
-                    TaskStatus::Failed => {
-                        let error = completion.error_message().unwrap_or("unknown error");
-                        self.status = format!("{} failed: {error}", completion.label);
-                    }
-                    TaskStatus::Cancelled => {
-                        self.status = format!("{} cancelled.", completion.label);
-                    }
-                    TaskStatus::Queued | TaskStatus::Running => {}
                 }
-            } else {
+            } else if !modal_is_showing {
                 match completion.status {
                     TaskStatus::Succeeded => {
                         self.status = format!("{} completed.", completion.label);
@@ -638,6 +654,16 @@ impl AppState {
                 self.dialog = DialogState::None;
                 self.status = "Confirmed placeholder dialog.".to_owned();
             }
+            DialogState::OperationProgress(task_id) => {
+                let task_id = *task_id;
+                let done = self
+                    .task_manager
+                    .task_by_id(task_id)
+                    .map_or(true, |t| t.status.is_finished());
+                if done {
+                    self.dialog = DialogState::None;
+                }
+            }
             DialogState::None => self.open_or_confirm_selected(),
         }
 
@@ -741,8 +767,7 @@ impl AppState {
                 mode,
             },
         );
-        self.dialog = DialogState::None;
-        self.status = format!("{label} in background.");
+        self.dialog = DialogState::OperationProgress(task_id);
     }
 
     fn begin_create_shortcut_in_other_pane(&mut self) {
@@ -944,7 +969,7 @@ impl AppState {
             vec![target_side]
         };
         self.transfer_task_panes.insert(task_id, refresh_sides);
-        self.status = format!("{label} in background.");
+        self.dialog = DialogState::OperationProgress(task_id);
     }
 
     fn begin_archive_name_input(&mut self) {
@@ -1031,7 +1056,7 @@ impl AppState {
             self.task_manager
                 .spawn_compress_to_archive(label.clone(), source_paths, archive_path);
         self.transfer_task_panes.insert(task_id, vec![target_side]);
-        self.status = format!("{label} in background.");
+        self.dialog = DialogState::OperationProgress(task_id);
 
         let pane = self.pane_mut(source_side);
         pane.marked_items.clear();
@@ -1063,8 +1088,7 @@ impl AppState {
                 .spawn_decompress_archive(label.clone(), archive_path, destination);
         self.transfer_task_panes
             .insert(task_id, vec![request.target_side]);
-        self.dialog = DialogState::None;
-        self.status = format!("{label} in background.");
+        self.dialog = DialogState::OperationProgress(task_id);
     }
 
     fn start_demo_task(&mut self, failing: bool) {
@@ -1225,7 +1249,8 @@ impl AppState {
             | DialogState::TextInput(_)
             | DialogState::DeleteConfirm(_)
             | DialogState::ShortcutConflict(_)
-            | DialogState::TransferConflict(_) => false,
+            | DialogState::TransferConflict(_)
+            | DialogState::OperationProgress(_) => false,
         }
     }
 
@@ -1478,7 +1503,8 @@ impl AppState {
             | DialogState::Settings(_)
             | DialogState::Favourites(_)
             | DialogState::Decompress(_)
-            | DialogState::SortBy(_) => None,
+            | DialogState::SortBy(_)
+            | DialogState::OperationProgress(_) => None,
         }
     }
 }
@@ -1972,6 +1998,7 @@ pub enum DialogState {
     Favourites(FavouritesModalState),
     Decompress(DecompressModalState),
     SortBy(SortByModalState),
+    OperationProgress(TaskId),
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
