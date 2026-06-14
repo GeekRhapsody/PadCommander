@@ -1589,8 +1589,12 @@ impl PaneState {
 
         let last_index = self.entries.len() - 1;
         let next_index = match movement {
-            SelectionMovement::Up => self.selected_index.saturating_sub(1),
-            SelectionMovement::Down => (self.selected_index + 1).min(last_index),
+            SelectionMovement::Up => {
+                if self.selected_index == 0 { last_index } else { self.selected_index - 1 }
+            }
+            SelectionMovement::Down => {
+                if self.selected_index >= last_index { 0 } else { self.selected_index + 1 }
+            }
             SelectionMovement::PageUp => self.selected_index.saturating_sub(PAGE_SIZE),
             SelectionMovement::PageDown => (self.selected_index + PAGE_SIZE).min(last_index),
             SelectionMovement::Home => 0,

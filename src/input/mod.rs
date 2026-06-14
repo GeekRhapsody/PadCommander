@@ -406,9 +406,9 @@ fn action_for_button(
     }
 
     match button {
-        Button::DPadLeft | Button::DPadRight | Button::LeftTrigger | Button::RightTrigger => {
-            Some(CommanderAction::SwitchPane)
-        }
+        Button::DPadLeft | Button::DPadRight => Some(CommanderAction::SwitchPane),
+        Button::LeftTrigger => Some(CommanderAction::MoveSelectionPageUp),
+        Button::RightTrigger => Some(CommanderAction::MoveSelectionPageDown),
         Button::South => Some(CommanderAction::OpenSelected),
         Button::East => Some(CommanderAction::GoBack),
         Button::West => Some(CommanderAction::ToggleMarkSelected),
