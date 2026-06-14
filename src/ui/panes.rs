@@ -233,19 +233,34 @@ fn pane_load_state(ui: &mut egui::Ui, load_state: &PaneLoadState) {
 }
 
 fn header_row(ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        ui.set_height(ROW_HEIGHT);
-        let name_width = name_column_width(ui);
+    let row_rect = egui::Rect::from_min_size(
+        ui.cursor().min,
+        egui::vec2(ui.available_width(), ROW_HEIGHT),
+    );
+    let content_rect = row_rect.shrink2(egui::vec2(8.0, 5.0));
+    let layout = RowLayout::new(ui);
+    let painter = ui.painter();
+    let font_id = egui::TextStyle::Body.resolve(ui.style());
+    let color = ui.visuals().strong_text_color();
+    let text_y = content_rect.center().y;
+    let mut x = content_rect.left();
 
-        left_aligned_label(ui, name_width, egui::RichText::new("Name").strong());
-        left_aligned_label(ui, TYPE_COLUMN_WIDTH, egui::RichText::new("Type").strong());
-        left_aligned_label(ui, SIZE_COLUMN_WIDTH, egui::RichText::new("Size").strong());
-        left_aligned_label(
-            ui,
-            MODIFIED_COLUMN_WIDTH,
-            egui::RichText::new("Modified").strong(),
-        );
-    });
+    let cell = |x: f32, w: f32| {
+        egui::Rect::from_min_size(
+            egui::pos2(x, text_y - ROW_HEIGHT / 2.0),
+            egui::vec2(w, ROW_HEIGHT),
+        )
+    };
+
+    paint_cell_text(painter, cell(x, layout.name_width), "Name", font_id.clone(), color, egui::Align2::LEFT_CENTER);
+    x += layout.name_width + layout.spacing;
+    paint_cell_text(painter, cell(x, TYPE_COLUMN_WIDTH), "Type", font_id.clone(), color, egui::Align2::CENTER_CENTER);
+    x += TYPE_COLUMN_WIDTH + layout.spacing;
+    paint_cell_text(painter, cell(x, SIZE_COLUMN_WIDTH), "Size", font_id.clone(), color, egui::Align2::RIGHT_CENTER);
+    x += SIZE_COLUMN_WIDTH + layout.spacing;
+    paint_cell_text(painter, cell(x, MODIFIED_COLUMN_WIDTH), "Modified", font_id, color, egui::Align2::LEFT_CENTER);
+
+    ui.advance_cursor_after_rect(row_rect);
 }
 
 fn paint_entry_row(
@@ -432,17 +447,6 @@ fn name_column_width(ui: &egui::Ui) -> f32 {
     let spacing = ui.spacing().item_spacing.x;
     let fixed_width = TYPE_COLUMN_WIDTH + SIZE_COLUMN_WIDTH + MODIFIED_COLUMN_WIDTH + spacing * 3.0;
     (ui.available_width() - fixed_width).max(MIN_NAME_COLUMN_WIDTH)
-}
-
-fn left_aligned_label(ui: &mut egui::Ui, width: f32, text: egui::RichText) {
-    ui.allocate_ui_with_layout(
-        egui::vec2(width, ROW_HEIGHT),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            ui.set_width(width);
-            ui.add(egui::Label::new(text).truncate());
-        },
-    );
 }
 
 fn bottom_status_bar(ui: &mut egui::Ui, pane: &PaneState) {
