@@ -167,12 +167,12 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                         .fill(egui::Color32::from_rgb(73, 104, 94))
                                         .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE));
                                 }
-                                if ui.add_sized([260.0, 34.0], button).clicked() {
+                                if ui.add_sized([ui.available_width(), 34.0], button).clicked() {
                                     actions.push(entry.action.clone());
                                 }
                             }
                             ui.add_space(8.0);
-                            ui.label("D-pad/arrow keys move. A / Enter selects. B / Esc cancels.");
+                            ui.label("D-pad moves. A selects. B cancels.");
                         }
                         DialogState::Settings(settings_modal) => {
                             ui.heading("Settings");
