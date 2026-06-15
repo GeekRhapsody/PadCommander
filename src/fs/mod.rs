@@ -18,16 +18,11 @@ pub const ROOTS_LOCATION: &str = "";
 pub struct LocalFileSystem;
 
 pub trait VirtualFileSystem {
-    fn scheme(&self) -> &'static str;
     fn initial_location(&self) -> String;
     fn list_location(&self, location: &str) -> Result<Vec<FileEntry>, VfsError>;
 }
 
 impl VirtualFileSystem for LocalFileSystem {
-    fn scheme(&self) -> &'static str {
-        "local"
-    }
-
     fn initial_location(&self) -> String {
         user_profile_location().unwrap_or_else(|| ROOTS_LOCATION.to_owned())
     }
@@ -89,10 +84,6 @@ impl LocalFileSystem {
         })?;
         Ok(target)
     }
-}
-
-pub fn scheme_name(vfs: &dyn VirtualFileSystem) -> &'static str {
-    vfs.scheme()
 }
 
 pub fn location_label(location: &str) -> &str {

@@ -345,14 +345,6 @@ impl AppState {
         DispatchResult::default()
     }
 
-    pub fn vfs_label(&self) -> &'static str {
-        fs::scheme_name(&self.local_file_system)
-    }
-
-    pub fn task_summary(&self) -> String {
-        self.task_manager.summary()
-    }
-
     pub fn poll_tasks(&mut self) {
         for completion in self.task_manager.poll_completed() {
             let modal_is_showing = matches!(self.dialog, DialogState::OperationProgress(id) if id == completion.id);

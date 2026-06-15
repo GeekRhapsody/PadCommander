@@ -310,23 +310,6 @@ impl Default for TaskManager {
 }
 
 impl TaskManager {
-    pub fn summary(&self) -> String {
-        let active_count = self.queue.active_count();
-        let failed_count = self.queue.failed_count();
-
-        match (active_count, failed_count) {
-            (0, 0) => "no active tasks".to_owned(),
-            (0, 1) => "no active tasks, 1 failure".to_owned(),
-            (0, failed_count) => format!("no active tasks, {failed_count} failures"),
-            (1, _) => self
-                .queue
-                .active_task()
-                .map(|task| task.title.clone())
-                .unwrap_or_else(|| "1 active task".to_owned()),
-            (active_count, _) => format!("{active_count} active task(s)"),
-        }
-    }
-
     pub fn task_by_id(&self, id: TaskId) -> Option<&TaskProgress> {
         self.queue.task_by_id(id)
     }
@@ -517,20 +500,6 @@ impl TaskQueue {
             .iter()
             .filter_map(|id| self.tasks.get(id))
             .find(|task| task.status.is_active())
-    }
-
-    pub fn active_count(&self) -> usize {
-        self.tasks
-            .values()
-            .filter(|task| task.status.is_active())
-            .count()
-    }
-
-    pub fn failed_count(&self) -> usize {
-        self.tasks
-            .values()
-            .filter(|task| task.status == TaskStatus::Failed)
-            .count()
     }
 
     pub fn task_by_id(&self, id: TaskId) -> Option<&TaskProgress> {
