@@ -1,10 +1,12 @@
 use std::{
+    collections::HashSet,
     env,
     ffi::OsString,
     fs,
-    io::{self, Read, Write},
+    io::{self, BufRead, Read, Write},
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
+    sync::mpsc,
     thread,
     time::Duration,
 };
@@ -71,7 +73,17 @@ impl ArchiveService for LocalArchiveService {
         password: Option<String>,
     ) -> TaskOutcome {
         match ArchiveFormat::from_path(&archive_path) {
-            Ok(_) => unarc_extract_archive(reporter, archive_path, destination, password),
+            Ok(ArchiveFormat::Zip) => {
+                unarc_extract_archive(reporter, archive_path, destination, password)
+            }
+            Ok(ArchiveFormat::SevenZip | ArchiveFormat::Rar) => {
+                match find_command(&["7z", "7za", "7zz"]) {
+                    Some(tool) => external_extract_archive(
+                        reporter, tool, archive_path, destination, password,
+                    ),
+                    None => unarc_extract_archive(reporter, archive_path, destination, password),
+                }
+            }
             Err(error) => TaskOutcome::Failed(error),
         }
     }
@@ -298,6 +310,31 @@ fn unarc_extract_plan(
         return Err("Archive contains no extractable entries.".to_owned());
     }
 
+    // Some archive formats (e.g. 7z) store directory entries without trailing slashes,
+    // so the name-based is_directory check misses them. Re-classify any entry whose
+    // output path is an ancestor of another entry's path as a directory.
+    let ancestor_paths: std::collections::HashSet<PathBuf> = entries
+        .iter()
+        .filter(|e| !e.is_directory)
+        .flat_map(|e| {
+            let mut ancestors = Vec::new();
+            let mut path = e.output_path.parent();
+            while let Some(parent) = path {
+                if parent == destination {
+                    break;
+                }
+                ancestors.push(parent.to_path_buf());
+                path = parent.parent();
+            }
+            ancestors
+        })
+        .collect();
+    for entry in &mut entries {
+        if !entry.is_directory && ancestor_paths.contains(&entry.output_path) {
+            entry.is_directory = true;
+        }
+    }
+
     Ok(UnarcExtractPlan {
         entries,
         total_bytes,
@@ -392,6 +429,14 @@ fn unarc_extract_archive(
                     parent.display()
                 ));
             }
+        }
+
+        // Guard against archive entries that are directories without trailing slashes
+        // (common in 7z): create_dir_all may have already created this path as a directory.
+        if plan_entry.output_path.is_dir() {
+            tracker.finish_item();
+            reporter.progress(tracker.snapshot(&plan_entry.output_path));
+            continue;
         }
 
         let output_file = match fs::OpenOptions::new()
@@ -589,6 +634,235 @@ fn external_create_archive(
     })
 }
 
+
+fn external_extract_archive(
+    reporter: TaskReporter,
+    tool: PathBuf,
+    archive_path: PathBuf,
+    destination: PathBuf,
+    password: Option<String>,
+) -> TaskOutcome {
+    let entries =
+        match seven_zip_list_entries(&tool, &archive_path, password.as_deref()) {
+            Ok(entries) => entries,
+            Err(error) => return TaskOutcome::Failed(error),
+        };
+
+    for entry in &entries {
+        if let Err(error) = safe_archive_output_path(&destination, entry) {
+            return TaskOutcome::Failed(error);
+        }
+    }
+
+    let destination_cleanup = match prepare_extract_destination(&destination) {
+        Ok(cleanup) => cleanup,
+        Err(error) => return TaskOutcome::Failed(error),
+    };
+
+    reporter.progress(ProgressSnapshot {
+        current_file: Some(format!("Extracting {}", archive_path.display())),
+        total_items: Some(entries.len() as u64),
+        ..ProgressSnapshot::default()
+    });
+
+    let mut args = vec![
+        OsString::from("x"),
+        OsString::from("-y"),
+        OsString::from("-bb1"),
+        OsString::from(format!("-o{}", destination.display())),
+    ];
+    if let Some(ref pwd) = password {
+        args.push(OsString::from(format!("-p{pwd}")));
+    }
+    args.push(archive_path.as_os_str().to_owned());
+
+    match run_command_with_output_progress(&reporter, &tool, &args, entries.len() as u64) {
+        Ok(items_done) => TaskOutcome::Succeeded(TaskCompletionData {
+            item_count: items_done as usize,
+            bytes_done: 0,
+        }),
+        Err(error) if error == "Task cancelled." => {
+            destination_cleanup.clean_up(&destination);
+            TaskOutcome::Cancelled
+        }
+        Err(error) => {
+            destination_cleanup.clean_up(&destination);
+            TaskOutcome::Failed(error)
+        }
+    }
+}
+
+fn seven_zip_list_entries(
+    tool: &Path,
+    archive_path: &Path,
+    password: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let password_arg = password
+        .map(|p| format!("-p{p}"))
+        .unwrap_or_else(|| "-p".to_owned());
+
+    let output = Command::new(tool)
+        .args(["l", "-slt"])
+        .arg(&password_arg)
+        .arg(archive_path)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| format!("Cannot run {}: {error}", tool.display()))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}\n{stderr}");
+    if !output.status.success() {
+        return Err(external_archive_error(
+            &combined,
+            "Cannot list archive entries.",
+        ));
+    }
+
+    let mut in_entries = false;
+    let mut entries = Vec::new();
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("----------") {
+            in_entries = true;
+            continue;
+        }
+        if in_entries
+            && let Some(path) = trimmed.strip_prefix("Path = ")
+            && !path.trim().is_empty()
+        {
+            entries.push(path.trim().to_owned());
+        }
+    }
+
+    if entries.is_empty() {
+        return Err("Archive contains no extractable entries.".to_owned());
+    }
+
+    Ok(entries)
+}
+
+fn run_command_with_output_progress(
+    reporter: &TaskReporter,
+    tool: &Path,
+    args: &[OsString],
+    total_items: u64,
+) -> Result<u64, String> {
+    let mut child = Command::new(tool)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("Cannot run {}: {error}", tool.display()))?;
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let (line_tx, line_rx) = mpsc::channel::<String>();
+    let stdout_handle = stdout.map(|s| spawn_line_reader(s, line_tx.clone()));
+    let stderr_handle = stderr.map(|s| spawn_line_reader(s, line_tx));
+
+    let mut seen = HashSet::new();
+    let mut items_done = 0u64;
+    let mut last_line = String::new();
+
+    loop {
+        while let Ok(line) = line_rx.try_recv() {
+            let trimmed = line.trim().to_owned();
+            if trimmed.is_empty() {
+                continue;
+            }
+            last_line = trimmed.clone();
+            if let Some(item) = archive_progress_item(&trimmed)
+                && seen.insert(item.clone())
+            {
+                items_done = items_done.saturating_add(1).min(total_items);
+                reporter.progress(ProgressSnapshot {
+                    current_file: Some(item),
+                    items_done,
+                    total_items: Some(total_items),
+                    ..ProgressSnapshot::default()
+                });
+            }
+        }
+
+        if reporter.is_cancelled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            join_reader(stdout_handle);
+            join_reader(stderr_handle);
+            return Err("Task cancelled.".to_owned());
+        }
+
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => {
+                join_reader(stdout_handle);
+                join_reader(stderr_handle);
+                reporter.progress(ProgressSnapshot {
+                    current_file: Some("Extraction complete".to_owned()),
+                    items_done: total_items,
+                    total_items: Some(total_items),
+                    ..ProgressSnapshot::default()
+                });
+                return Ok(total_items);
+            }
+            Ok(Some(status)) => {
+                join_reader(stdout_handle);
+                join_reader(stderr_handle);
+                return Err(external_archive_error(
+                    &last_line,
+                    &format!("{} failed with status {status}.", tool.display()),
+                ));
+            }
+            Ok(None) => thread::sleep(COMMAND_POLL_INTERVAL),
+            Err(error) => {
+                join_reader(stdout_handle);
+                join_reader(stderr_handle);
+                return Err(format!("Cannot wait for {}: {error}", tool.display()));
+            }
+        }
+    }
+}
+
+fn spawn_line_reader<R: Read + Send + 'static>(
+    reader: R,
+    tx: mpsc::Sender<String>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let reader = io::BufReader::new(reader);
+        for line in reader.lines().map_while(Result::ok) {
+            let _ = tx.send(line);
+        }
+    })
+}
+
+fn join_reader(handle: Option<thread::JoinHandle<()>>) {
+    if let Some(handle) = handle {
+        let _ = handle.join();
+    }
+}
+
+fn archive_progress_item(line: &str) -> Option<String> {
+    ["Extracting", "Inflating", "Adding", "Compressing"]
+        .into_iter()
+        .find_map(|prefix| {
+            line.strip_prefix(prefix)
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(ToOwned::to_owned)
+        })
+}
+
+fn external_archive_error(output: &str, fallback: &str) -> String {
+    let lower = output.to_ascii_lowercase();
+    if lower.contains("password") || lower.contains("encrypted") {
+        "This archive is password-protected. Enter the password and try again.".to_owned()
+    } else if output.trim().is_empty() {
+        fallback.to_owned()
+    } else {
+        format!("{fallback} {}", output.trim())
+    }
+}
 
 fn run_command_waiting(
     reporter: &TaskReporter,
