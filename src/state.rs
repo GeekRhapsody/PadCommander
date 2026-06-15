@@ -2326,10 +2326,10 @@ impl CommandMenuState {
         let last_index = self.entries.len() - 1;
         self.focused_index = match movement {
             SelectionMovement::Up | SelectionMovement::PageUp => {
-                self.focused_index.saturating_sub(1)
+                if self.focused_index == 0 { last_index } else { self.focused_index - 1 }
             }
             SelectionMovement::Down | SelectionMovement::PageDown => {
-                (self.focused_index + 1).min(last_index)
+                if self.focused_index >= last_index { 0 } else { self.focused_index + 1 }
             }
             SelectionMovement::Home => 0,
             SelectionMovement::End => last_index,
