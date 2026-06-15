@@ -15,10 +15,20 @@ use crate::{
 pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<CommanderAction> {
     let mut actions = Vec::new();
 
-    egui::Panel::top("top_status")
-        .exact_size(64.0)
+    egui::Panel::top("top_title")
+        .exact_size(40.0)
         .frame(panel_frame(egui::Color32::from_rgb(31, 35, 34)))
-        .show_inside(ui, |ui| header(ui, state));
+        .show_inside(ui, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(2.0);
+                ui.heading(APP_TITLE);
+            });
+        });
+
+    egui::Panel::bottom("bottom_status")
+        .exact_size(30.0)
+        .frame(panel_frame(egui::Color32::from_rgb(31, 35, 34)))
+        .show_inside(ui, |ui| footer(ui, state));
 
     egui::CentralPanel::default()
         .frame(panel_frame(egui::Color32::from_rgb(20, 22, 23)))
@@ -31,31 +41,8 @@ pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<CommanderAction> {
     actions
 }
 
-fn header(ui: &mut egui::Ui, state: &AppState) {
-    ui.vertical_centered(|ui| {
-        ui.add_space(2.0);
-        ui.heading(APP_TITLE);
-        ui.horizontal(|ui| {
-            ui.label(format!("Active pane: {}", state.active_pane_label()));
-            ui.separator();
-            ui.label(format!(
-                "Selected: {}",
-                state
-                    .active_pane()
-                    .selected_entry()
-                    .map(|entry| entry.display_name.as_str())
-                    .unwrap_or("none")
-            ));
-            ui.separator();
-            ui.label(format!("UI scale: {:.1}", state.settings.ui_scale));
-            ui.separator();
-            ui.label(format!("VFS: {}", state.vfs_label()));
-            ui.separator();
-            ui.label(format!("Tasks: {}", state.task_summary()));
-            ui.separator();
-            ui.label(&state.status);
-        });
-    });
+fn footer(ui: &mut egui::Ui, state: &AppState) {
+    ui.label(&state.status);
 }
 
 fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<CommanderAction>) {
