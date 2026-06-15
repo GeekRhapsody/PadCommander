@@ -2298,7 +2298,6 @@ impl CommandMenuState {
             CommandMenuEntry::new("Sort By", CommanderAction::OpenSortBy),
             CommandMenuEntry::new("Rename", CommanderAction::Rename),
             CommandMenuEntry::new("Delete", CommanderAction::Delete),
-            CommandMenuEntry::new("Cancel Task", CommanderAction::CancelActiveTask),
         ]);
 
         Self {
