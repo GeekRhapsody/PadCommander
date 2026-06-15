@@ -75,6 +75,7 @@ pub struct AppState {
     pub delete_tasks: BTreeMap<u64, DeleteTaskContext>,
     pub transfer_task_panes: BTreeMap<TaskId, Vec<PaneSide>>,
     pending_shortcut_request: Option<PendingShortcutRequest>,
+    pending_decompress_request: Option<DecompressRequest>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -116,6 +117,7 @@ impl AppState {
             delete_tasks: BTreeMap::new(),
             transfer_task_panes: BTreeMap::new(),
             pending_shortcut_request: None,
+            pending_decompress_request: None,
         };
 
         state.refresh_pane(PaneSide::Left);
@@ -651,7 +653,13 @@ impl AppState {
             DialogState::Favourites(_) => self.open_focused_favourite(),
             DialogState::Decompress(decompress) => {
                 let request = decompress.selected_request();
-                self.start_archive_decompression(request);
+                let archive_path = PathBuf::from(&request.archive.virtual_path);
+                if crate::archive::check_archive_is_encrypted(&archive_path) {
+                    self.pending_decompress_request = Some(request);
+                    self.begin_text_input(TextInputPurpose::ArchivePassword, String::new());
+                } else {
+                    self.start_archive_decompression(request, None);
+                }
             }
             DialogState::SortBy(sort_by) => {
                 self.apply_active_pane_sort(sort_by.selected_sort_order());
@@ -720,6 +728,14 @@ impl AppState {
             }
             TextInputPurpose::ArchiveDestination => {
                 self.status = "Use Decompress to choose an extraction destination.".to_owned();
+                return;
+            }
+            TextInputPurpose::ArchivePassword => {
+                let Some(request) = self.pending_decompress_request.take() else {
+                    self.status = "No pending archive extraction.".to_owned();
+                    return;
+                };
+                self.start_archive_decompression(request, Some(value));
                 return;
             }
             TextInputPurpose::ShortcutName => {
@@ -842,6 +858,15 @@ impl AppState {
             })
         ) {
             self.pending_shortcut_request = None;
+        }
+        if matches!(
+            self.dialog,
+            DialogState::TextInput(TextInputDialogState {
+                purpose: TextInputPurpose::ArchivePassword,
+                ..
+            })
+        ) {
+            self.pending_decompress_request = None;
         }
     }
 
@@ -1070,7 +1095,7 @@ impl AppState {
         pane.marked_items.clear();
     }
 
-    fn start_archive_decompression(&mut self, request: DecompressRequest) {
+    fn start_archive_decompression(&mut self, request: DecompressRequest, password: Option<String>) {
         let target_location = self.pane(request.target_side).current_location.clone();
         if target_location == fs::ROOTS_LOCATION {
             self.status = format!(
@@ -1091,9 +1116,12 @@ impl AppState {
             request.archive.display_name,
             destination.display()
         );
-        let task_id =
-            self.task_manager
-                .spawn_decompress_archive(label.clone(), archive_path, destination);
+        let task_id = self.task_manager.spawn_decompress_archive(
+            label.clone(),
+            archive_path,
+            destination,
+            password,
+        );
         self.transfer_task_panes
             .insert(task_id, vec![request.target_side]);
         self.dialog = DialogState::OperationProgress(task_id);
@@ -2695,6 +2723,7 @@ impl TextInputPurpose {
             TextInputPurpose::ConnectFtp => "Connect FTP",
             TextInputPurpose::ArchiveName => "Archive Name",
             TextInputPurpose::ArchiveDestination => "Extract To Folder",
+            TextInputPurpose::ArchivePassword => "Archive Password",
             TextInputPurpose::ShortcutName => "Shortcut Name",
             TextInputPurpose::FtpProfileField => "FTP Profile Field",
         }
@@ -3042,6 +3071,7 @@ mod tests {
             delete_tasks: BTreeMap::new(),
             transfer_task_panes: BTreeMap::new(),
             pending_shortcut_request: None,
+            pending_decompress_request: None,
         }
     }
 

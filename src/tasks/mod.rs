@@ -431,9 +431,10 @@ impl TaskManager {
         label: String,
         archive_path: PathBuf,
         destination: PathBuf,
+        password: Option<String>,
     ) -> TaskId {
         self.spawn_threaded(TaskKind::Decompress, label, true, move |reporter| {
-            LocalArchiveService.extract_archive(reporter, archive_path, destination)
+            LocalArchiveService.extract_archive(reporter, archive_path, destination, password)
         })
     }
 
@@ -1389,6 +1390,7 @@ mod tests {
             "Zip extract test".to_owned(),
             archive_path,
             destination.clone(),
+            None,
         );
         let completion = wait_for_completion(&mut manager, task_id);
 

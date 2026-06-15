@@ -1,17 +1,17 @@
 use std::{
-    collections::HashSet,
     env,
     ffi::OsString,
     fs,
-    io::{self, BufRead, Read, Write},
+    io::{self, Read, Write},
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
-    sync::mpsc,
     thread,
     time::Duration,
 };
 
-use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
+use unarc_rs::unified::{ArchiveFormat as UnarcFormat, ArchiveOptions};
+
+use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
 use crate::tasks::{ProgressSnapshot, TaskCompletionData, TaskOutcome, TaskReporter};
 
@@ -30,6 +30,7 @@ pub trait ArchiveService {
         reporter: TaskReporter,
         archive_path: PathBuf,
         destination: PathBuf,
+        password: Option<String>,
     ) -> TaskOutcome;
 }
 
@@ -67,17 +68,11 @@ impl ArchiveService for LocalArchiveService {
         reporter: TaskReporter,
         archive_path: PathBuf,
         destination: PathBuf,
+        password: Option<String>,
     ) -> TaskOutcome {
-        let format = match ArchiveFormat::from_path(&archive_path) {
-            Ok(format) => format,
-            Err(error) => return TaskOutcome::Failed(error),
-        };
-
-        match format {
-            ArchiveFormat::Zip => zip_extract_archive(reporter, archive_path, destination),
-            ArchiveFormat::SevenZip | ArchiveFormat::Rar => {
-                external_extract_archive(reporter, archive_path, destination)
-            }
+        match ArchiveFormat::from_path(&archive_path) {
+            Ok(_) => unarc_extract_archive(reporter, archive_path, destination, password),
+            Err(error) => TaskOutcome::Failed(error),
         }
     }
 }
@@ -230,26 +225,92 @@ fn zip_add_file<W: Write + io::Seek>(
     Ok(())
 }
 
-fn zip_extract_archive(
+struct UnarcExtractEntry {
+    output_path: PathBuf,
+    is_directory: bool,
+}
+
+struct UnarcExtractPlan {
+    entries: Vec<UnarcExtractEntry>,
+    total_bytes: u64,
+}
+
+struct ProgressWriter<'a, W: Write> {
+    inner: W,
+    reporter: &'a TaskReporter,
+    tracker: &'a mut ArchiveProgressTracker,
+    output_path: &'a Path,
+}
+
+impl<W: Write> Write for ProgressWriter<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.reporter.is_cancelled() {
+            return Err(io::Error::other("Task cancelled."));
+        }
+        let n = self.inner.write(buf)?;
+        self.tracker.add_bytes(n as u64);
+        self.reporter.progress(self.tracker.snapshot(self.output_path));
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+fn unarc_extract_plan(
+    archive_path: &Path,
+    destination: &Path,
+    password: Option<&str>,
+) -> Result<UnarcExtractPlan, String> {
+    let open_options = unarc_options(password);
+    let mut archive = UnarcFormat::open_path_with_options(archive_path, open_options)
+        .map_err(|error| format!("Cannot open {}: {error}", archive_path.display()))?;
+
+    let mut entries = Vec::new();
+    let mut total_bytes = 0u64;
+
+    loop {
+        let entry = match archive.next_entry() {
+            Ok(Some(e)) => e,
+            Ok(None) => break,
+            Err(error) => {
+                return Err(unarc_error(
+                    &error.to_string(),
+                    &format!("Cannot read {}.", archive_path.display()),
+                ));
+            }
+        };
+
+        let name = entry.name();
+        let is_directory = name.ends_with('/') || name.ends_with('\\');
+        let original_size = entry.original_size();
+        let output_path = safe_archive_output_path(destination, name)?;
+
+        total_bytes = total_bytes.saturating_add(original_size);
+        entries.push(UnarcExtractEntry {
+            output_path,
+            is_directory,
+        });
+    }
+
+    if entries.is_empty() {
+        return Err("Archive contains no extractable entries.".to_owned());
+    }
+
+    Ok(UnarcExtractPlan {
+        entries,
+        total_bytes,
+    })
+}
+
+fn unarc_extract_archive(
     reporter: TaskReporter,
     archive_path: PathBuf,
     destination: PathBuf,
+    password: Option<String>,
 ) -> TaskOutcome {
-    let file = match fs::File::open(&archive_path) {
-        Ok(file) => file,
-        Err(error) => {
-            return TaskOutcome::Failed(format!("Cannot open {}: {error}", archive_path.display()));
-        }
-    };
-
-    let mut archive = match ZipArchive::new(file) {
-        Ok(archive) => archive,
-        Err(error) => {
-            return TaskOutcome::Failed(format!("Cannot read {}: {error}", archive_path.display()));
-        }
-    };
-
-    let plan = match zip_extract_plan(&mut archive, &destination) {
+    let plan = match unarc_extract_plan(&archive_path, &destination, password.as_deref()) {
         Ok(plan) => plan,
         Err(error) => return TaskOutcome::Failed(error),
     };
@@ -266,27 +327,115 @@ fn zip_extract_archive(
         ..ProgressSnapshot::default()
     });
 
+    let mut archive = match UnarcFormat::open_path_with_options(
+        &archive_path,
+        unarc_options(password.as_deref()),
+    ) {
+        Ok(archive) => archive,
+        Err(error) => {
+            destination_cleanup.clean_up(&destination);
+            return TaskOutcome::Failed(format!(
+                "Cannot open {}: {error}",
+                archive_path.display()
+            ));
+        }
+    };
+
     let mut tracker = ArchiveProgressTracker::new(LocalArchiveTotals {
         bytes: plan.total_bytes,
         items: plan.entries.len() as u64,
     });
 
-    for entry in plan.entries {
+
+    let mut plan_idx = 0;
+    loop {
+        let entry = match archive.next_entry() {
+            Ok(Some(e)) => e,
+            Ok(None) => break,
+            Err(error) => {
+                destination_cleanup.clean_up(&destination);
+                return TaskOutcome::Failed(unarc_error(
+                    &error.to_string(),
+                    "Cannot read archive entry.",
+                ));
+            }
+        };
+
         if reporter.is_cancelled() {
             destination_cleanup.clean_up(&destination);
             return TaskOutcome::Cancelled;
         }
 
-        if let Err(error) = zip_extract_entry(&reporter, &mut tracker, &mut archive, &entry) {
-            destination_cleanup.clean_up(&destination);
-            if error == "Task cancelled." {
-                return TaskOutcome::Cancelled;
+        let Some(plan_entry) = plan.entries.get(plan_idx) else {
+            break;
+        };
+        plan_idx += 1;
+
+        if plan_entry.is_directory {
+            if let Err(error) = fs::create_dir_all(&plan_entry.output_path) {
+                destination_cleanup.clean_up(&destination);
+                return TaskOutcome::Failed(format!(
+                    "Cannot create {}: {error}",
+                    plan_entry.output_path.display()
+                ));
             }
-            return TaskOutcome::Failed(error);
+            tracker.finish_item();
+            reporter.progress(tracker.snapshot(&plan_entry.output_path));
+            continue;
+        }
+
+        if let Some(parent) = plan_entry.output_path.parent() {
+            if let Err(error) = fs::create_dir_all(parent) {
+                destination_cleanup.clean_up(&destination);
+                return TaskOutcome::Failed(format!(
+                    "Cannot create {}: {error}",
+                    parent.display()
+                ));
+            }
+        }
+
+        let output_file = match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&plan_entry.output_path)
+        {
+            Ok(file) => file,
+            Err(error) => {
+                destination_cleanup.clean_up(&destination);
+                return TaskOutcome::Failed(format!(
+                    "Cannot create {}: {error}",
+                    plan_entry.output_path.display()
+                ));
+            }
+        };
+
+        let result = {
+            let mut writer = ProgressWriter {
+                inner: output_file,
+                reporter: &reporter,
+                tracker: &mut tracker,
+                output_path: &plan_entry.output_path,
+            };
+            archive.read_to(&entry, &mut writer)
+        };
+
+        match result {
+            Ok(_) => {}
+            Err(error) => {
+                destination_cleanup.clean_up(&destination);
+                let msg = error.to_string();
+                if msg.contains("Task cancelled.") {
+                    return TaskOutcome::Cancelled;
+                }
+                return TaskOutcome::Failed(unarc_error(
+                    &msg,
+                    &format!("Cannot extract {}.", plan_entry.output_path.display()),
+                ));
+            }
         }
 
         tracker.finish_item();
-        reporter.progress(tracker.snapshot(&entry.output_path));
+        reporter.progress(tracker.snapshot(&plan_entry.output_path));
     }
 
     TaskOutcome::Succeeded(TaskCompletionData {
@@ -295,88 +444,49 @@ fn zip_extract_archive(
     })
 }
 
-fn zip_extract_plan<R: Read + io::Seek>(
-    archive: &mut ZipArchive<R>,
-    destination: &Path,
-) -> Result<ZipExtractPlan, String> {
-    let mut entries = Vec::new();
-    let mut total_bytes = 0u64;
-
-    for index in 0..archive.len() {
-        let file = archive
-            .by_index(index)
-            .map_err(|error| format!("Cannot inspect archive entry {index}: {error}"))?;
-        if file.encrypted() {
-            return Err(
-                "Password-protected ZIP archives are detected but password entry is not supported yet."
-                    .to_owned(),
-            );
+pub fn check_archive_is_encrypted(path: &Path) -> bool {
+    let Ok(_format) = ArchiveFormat::from_path(path) else {
+        return false;
+    };
+    let mut archive = match UnarcFormat::open_path(path) {
+        Ok(archive) => archive,
+        Err(error) => {
+            let msg = error.to_string().to_ascii_lowercase();
+            return msg.contains("password") || msg.contains("encrypted");
         }
-
-        let name = file.name().to_owned();
-        let output_path = safe_archive_output_path(destination, &name)?;
-        total_bytes = total_bytes.saturating_add(file.size());
-        entries.push(ZipExtractEntry {
-            index,
-            output_path,
-            is_directory: file.is_dir(),
-        });
+    };
+    loop {
+        match archive.next_entry() {
+            Ok(Some(entry)) => {
+                if entry.is_encrypted() {
+                    return true;
+                }
+            }
+            Ok(None) | Err(_) => return false,
+        }
     }
-
-    Ok(ZipExtractPlan {
-        entries,
-        total_bytes,
-    })
 }
 
-fn zip_extract_entry<R: Read + io::Seek>(
-    reporter: &TaskReporter,
-    tracker: &mut ArchiveProgressTracker,
-    archive: &mut ZipArchive<R>,
-    entry: &ZipExtractEntry,
-) -> Result<(), String> {
-    let mut file = archive
-        .by_index(entry.index)
-        .map_err(|error| format!("Cannot read archive entry {}: {error}", entry.index))?;
-
-    if entry.is_directory {
-        fs::create_dir_all(&entry.output_path)
-            .map_err(|error| format!("Cannot create {}: {error}", entry.output_path.display()))?;
-        return Ok(());
+fn unarc_options(password: Option<&str>) -> ArchiveOptions {
+    match password {
+        Some(pw) => ArchiveOptions::new().with_password(pw),
+        None => ArchiveOptions::new(),
     }
+}
 
-    if let Some(parent) = entry.output_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("Cannot create {}: {error}", parent.display()))?;
+fn unarc_error(output: &str, fallback: &str) -> String {
+    let lower = output.to_ascii_lowercase();
+    if lower.contains("password")
+        || lower.contains("encrypted")
+        || lower.contains("mac")
+        || lower.contains("integrity")
+    {
+        "Incorrect password or the archive is corrupted.".to_owned()
+    } else if output.trim().is_empty() {
+        fallback.to_owned()
+    } else {
+        format!("{fallback} {}", output.trim())
     }
-
-    let mut output = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&entry.output_path)
-        .map_err(|error| format!("Cannot create {}: {error}", entry.output_path.display()))?;
-    let mut buffer = [0u8; 64 * 1024];
-
-    loop {
-        if reporter.is_cancelled() {
-            return Err("Task cancelled.".to_owned());
-        }
-
-        let bytes_read = file
-            .read(&mut buffer)
-            .map_err(|error| format!("Cannot extract {}: {error}", entry.output_path.display()))?;
-        if bytes_read == 0 {
-            break;
-        }
-
-        output
-            .write_all(&buffer[..bytes_read])
-            .map_err(|error| format!("Cannot write {}: {error}", entry.output_path.display()))?;
-        tracker.add_bytes(bytes_read as u64);
-        reporter.progress(tracker.snapshot(&entry.output_path));
-    }
-
-    Ok(())
 }
 
 fn external_create_archive(
@@ -479,108 +589,6 @@ fn external_create_archive(
     })
 }
 
-fn external_extract_archive(
-    reporter: TaskReporter,
-    archive_path: PathBuf,
-    destination: PathBuf,
-) -> TaskOutcome {
-    let tool = match find_command(&["7z", "7za", "7zz"]) {
-        Some(tool) => tool,
-        None => {
-            return TaskOutcome::Failed(
-                "RAR and 7z extraction requires 7-Zip (7z.exe, 7za.exe, or 7zz.exe) on PATH."
-                    .to_owned(),
-            );
-        }
-    };
-
-    let entries = match seven_zip_list_entries(&tool, &archive_path) {
-        Ok(entries) => entries,
-        Err(error) => return TaskOutcome::Failed(error),
-    };
-
-    for entry in &entries {
-        if let Err(error) = safe_archive_output_path(&destination, entry) {
-            return TaskOutcome::Failed(error);
-        }
-    }
-
-    let destination_cleanup = match prepare_extract_destination(&destination) {
-        Ok(cleanup) => cleanup,
-        Err(error) => return TaskOutcome::Failed(error),
-    };
-
-    reporter.progress(ProgressSnapshot {
-        current_file: Some(format!("Extracting {}", archive_path.display())),
-        total_items: Some(entries.len() as u64),
-        ..ProgressSnapshot::default()
-    });
-
-    let args = vec![
-        OsString::from("x"),
-        OsString::from("-y"),
-        OsString::from("-bb1"),
-        OsString::from(format!("-o{}", destination.display())),
-        archive_path.as_os_str().to_owned(),
-    ];
-
-    match run_command_with_output_progress(&reporter, &tool, &args, entries.len() as u64) {
-        Ok(items_done) => TaskOutcome::Succeeded(TaskCompletionData {
-            item_count: items_done as usize,
-            bytes_done: 0,
-        }),
-        Err(error) if error == "Task cancelled." => {
-            destination_cleanup.clean_up(&destination);
-            TaskOutcome::Cancelled
-        }
-        Err(error) => {
-            destination_cleanup.clean_up(&destination);
-            TaskOutcome::Failed(error)
-        }
-    }
-}
-
-fn seven_zip_list_entries(tool: &Path, archive_path: &Path) -> Result<Vec<String>, String> {
-    let output = Command::new(tool)
-        .args(["l", "-slt", "-p"])
-        .arg(archive_path)
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|error| format!("Cannot run {}: {error}", tool.display()))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined = format!("{stdout}\n{stderr}");
-    if !output.status.success() {
-        return Err(external_archive_error(
-            &combined,
-            "Cannot list archive entries.",
-        ));
-    }
-
-    let mut in_entries = false;
-    let mut entries = Vec::new();
-    for line in stdout.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("----------") {
-            in_entries = true;
-            continue;
-        }
-
-        if in_entries
-            && let Some(path) = trimmed.strip_prefix("Path = ")
-            && !path.trim().is_empty()
-        {
-            entries.push(path.trim().to_owned());
-        }
-    }
-
-    if entries.is_empty() {
-        return Err("Archive contains no extractable entries.".to_owned());
-    }
-
-    Ok(entries)
-}
 
 fn run_command_waiting(
     reporter: &TaskReporter,
@@ -617,128 +625,6 @@ fn run_command_waiting(
     }
 }
 
-fn run_command_with_output_progress(
-    reporter: &TaskReporter,
-    tool: &Path,
-    args: &[OsString],
-    total_items: u64,
-) -> Result<u64, String> {
-    let mut child = Command::new(tool)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("Cannot run {}: {error}", tool.display()))?;
-
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let (line_tx, line_rx) = mpsc::channel::<String>();
-    let stdout_handle = stdout.map(|stdout| spawn_line_reader(stdout, line_tx.clone()));
-    let stderr_handle = stderr.map(|stderr| spawn_line_reader(stderr, line_tx));
-
-    let mut seen = HashSet::new();
-    let mut items_done = 0u64;
-    let mut last_line = String::new();
-
-    loop {
-        while let Ok(line) = line_rx.try_recv() {
-            let trimmed = line.trim().to_owned();
-            if trimmed.is_empty() {
-                continue;
-            }
-            last_line = trimmed.clone();
-            if let Some(item) = archive_progress_item(&trimmed)
-                && seen.insert(item.clone())
-            {
-                items_done = items_done.saturating_add(1).min(total_items);
-                reporter.progress(ProgressSnapshot {
-                    current_file: Some(item),
-                    items_done,
-                    total_items: Some(total_items),
-                    ..ProgressSnapshot::default()
-                });
-            }
-        }
-
-        if reporter.is_cancelled() {
-            let _ = child.kill();
-            let _ = child.wait();
-            join_reader(stdout_handle);
-            join_reader(stderr_handle);
-            return Err("Task cancelled.".to_owned());
-        }
-
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => {
-                join_reader(stdout_handle);
-                join_reader(stderr_handle);
-                reporter.progress(ProgressSnapshot {
-                    current_file: Some("Extraction complete".to_owned()),
-                    items_done: total_items,
-                    total_items: Some(total_items),
-                    ..ProgressSnapshot::default()
-                });
-                return Ok(total_items);
-            }
-            Ok(Some(status)) => {
-                join_reader(stdout_handle);
-                join_reader(stderr_handle);
-                return Err(external_archive_error(
-                    &last_line,
-                    &format!("{} failed with status {status}.", tool.display()),
-                ));
-            }
-            Ok(None) => thread::sleep(COMMAND_POLL_INTERVAL),
-            Err(error) => {
-                join_reader(stdout_handle);
-                join_reader(stderr_handle);
-                return Err(format!("Cannot wait for {}: {error}", tool.display()));
-            }
-        }
-    }
-}
-
-fn spawn_line_reader<R: Read + Send + 'static>(
-    reader: R,
-    tx: mpsc::Sender<String>,
-) -> thread::JoinHandle<()> {
-    thread::spawn(move || {
-        let reader = io::BufReader::new(reader);
-        for line in reader.lines().map_while(Result::ok) {
-            let _ = tx.send(line);
-        }
-    })
-}
-
-fn join_reader(handle: Option<thread::JoinHandle<()>>) {
-    if let Some(handle) = handle {
-        let _ = handle.join();
-    }
-}
-
-fn archive_progress_item(line: &str) -> Option<String> {
-    ["Extracting", "Inflating", "Adding", "Compressing"]
-        .into_iter()
-        .find_map(|prefix| {
-            line.strip_prefix(prefix)
-                .map(str::trim)
-                .filter(|item| !item.is_empty())
-                .map(ToOwned::to_owned)
-        })
-}
-
-fn external_archive_error(output: &str, fallback: &str) -> String {
-    let lower = output.to_ascii_lowercase();
-    if lower.contains("password") || lower.contains("encrypted") {
-        "This archive appears to be password-protected. Password entry is not supported for this archive type yet."
-            .to_owned()
-    } else if output.trim().is_empty() {
-        fallback.to_owned()
-    } else {
-        format!("{fallback} {}", output.trim())
-    }
-}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ArchiveCreatePlan {
@@ -891,19 +777,6 @@ fn ensure_archive_directory_name(name: &str) -> String {
     } else {
         format!("{name}/")
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct ZipExtractPlan {
-    entries: Vec<ZipExtractEntry>,
-    total_bytes: u64,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct ZipExtractEntry {
-    index: usize,
-    output_path: PathBuf,
-    is_directory: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

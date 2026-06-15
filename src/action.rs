@@ -87,6 +87,7 @@ pub enum TextInputPurpose {
     ConnectFtp,
     ArchiveName,
     ArchiveDestination,
+    ArchivePassword,
     ShortcutName,
     FtpProfileField,
 }
