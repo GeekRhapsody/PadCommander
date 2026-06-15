@@ -41,6 +41,7 @@ impl eframe::App for PadCommanderApp {
             self.state.text_dialog_is_open(),
             self.state.settings_dialog_is_open(),
             self.state.modal_is_active(),
+            self.state.show_input_help,
         );
         for action in actions {
             self.handle_action(&ctx, action);

@@ -28,15 +28,23 @@ impl InputManager {
         text_input_active: bool,
         settings_active: bool,
         modal_active: bool,
+        input_help_active: bool,
     ) -> Vec<CommanderAction> {
         let now = Instant::now();
-        let mut actions =
-            self.keyboard
-                .collect_actions(ctx, now, text_input_active, settings_active);
-        actions.extend(
-            self.gamepad
-                .poll_actions(now, text_input_active, settings_active, modal_active),
+        let mut actions = self.keyboard.collect_actions(
+            ctx,
+            now,
+            text_input_active,
+            settings_active,
+            input_help_active,
         );
+        actions.extend(self.gamepad.poll_actions(
+            now,
+            text_input_active,
+            settings_active,
+            modal_active,
+            input_help_active,
+        ));
         actions
     }
 }
@@ -54,6 +62,7 @@ impl KeyboardInputManager {
         now: Instant,
         text_input_active: bool,
         settings_active: bool,
+        input_help_active: bool,
     ) -> Vec<CommanderAction> {
         ctx.input(|input| {
             let mut actions = Vec::new();
@@ -104,6 +113,19 @@ impl KeyboardInputManager {
                     actions.push(CommanderAction::QuitDevelopment);
                 }
 
+                return actions;
+            }
+
+            if input_help_active {
+                if input.key_pressed(egui::Key::Escape) {
+                    actions.push(CommanderAction::Cancel);
+                }
+                if input.key_pressed(egui::Key::F1) {
+                    actions.push(CommanderAction::ToggleInputHelp);
+                }
+                if input.modifiers.ctrl && input.key_pressed(egui::Key::Q) {
+                    actions.push(CommanderAction::QuitDevelopment);
+                }
                 return actions;
             }
 
@@ -248,6 +270,7 @@ impl GamepadInputManager {
         text_input_active: bool,
         settings_active: bool,
         modal_active: bool,
+        input_help_active: bool,
     ) -> Vec<CommanderAction> {
         let mut actions = Vec::new();
 
@@ -286,6 +309,7 @@ impl GamepadInputManager {
                             text_input_active,
                             settings_active,
                             modal_active,
+                            input_help_active,
                         ));
                     }
                 }
@@ -349,7 +373,7 @@ impl GamepadInputManager {
                 now,
                 CommanderAction::MoveSelectionDown,
             ));
-        } else {
+        } else if !input_help_active {
             actions.extend(self.dpad_up.update(
                 self.dpad_up_held,
                 now,
@@ -381,6 +405,7 @@ fn action_for_button(
     text_input_active: bool,
     settings_active: bool,
     modal_active: bool,
+    input_help_active: bool,
 ) -> Option<CommanderAction> {
     if text_input_active {
         return match button {
@@ -395,6 +420,14 @@ fn action_for_button(
             Button::RightTrigger => {
                 Some(CommanderAction::TextInput(TextInputAction::CursorRight))
             }
+            _ => None,
+        };
+    }
+
+    if input_help_active {
+        return match button {
+            Button::East => Some(CommanderAction::Cancel),
+            Button::Select => Some(CommanderAction::ToggleInputHelp),
             _ => None,
         };
     }
