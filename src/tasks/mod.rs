@@ -1415,7 +1415,7 @@ mod tests {
         write_bytes(&source, 3);
         write_bytes(&target.join("source.txt"), 2);
 
-        let error = LocalTransferPlan::new(vec![source], target).expect_err("target conflict");
+        let error = LocalTransferPlan::new(vec![source], target, false).expect_err("target conflict");
 
         assert!(error.contains("already exists"));
         fs::remove_dir_all(&root).expect("remove test dir");

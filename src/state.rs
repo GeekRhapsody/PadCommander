@@ -3017,6 +3017,7 @@ mod tests {
                 sort_order: PaneSortOrder::default(),
                 scroll_offset: 0.0,
                 needs_scroll_to_selected: false,
+                cached_free_space: None,
                 navigation_history: Vec::new(),
             },
             right_pane: PaneState {
@@ -3029,6 +3030,7 @@ mod tests {
                 sort_order: PaneSortOrder::default(),
                 scroll_offset: 0.0,
                 needs_scroll_to_selected: false,
+                cached_free_space: None,
                 navigation_history: Vec::new(),
             },
             active_pane: PaneSide::Left,
@@ -3228,7 +3230,7 @@ mod tests {
     }
 
     #[test]
-    fn selection_movement_is_clamped_to_entries() {
+    fn selection_movement_wraps_circularly() {
         let mut state = test_state();
 
         assert_eq!(state.active_pane().selected_index, 1);
@@ -3236,8 +3238,12 @@ mod tests {
         state.dispatch_action(CommanderAction::MoveSelectionUp);
         assert_eq!(state.active_pane().selected_index, 0);
 
+        // wraps from first to last
         state.dispatch_action(CommanderAction::MoveSelectionUp);
-        assert_eq!(state.active_pane().selected_index, 0);
+        assert_eq!(
+            state.active_pane().selected_index,
+            state.active_pane().entries.len() - 1
+        );
 
         state.dispatch_action(CommanderAction::MoveSelectionEnd);
         assert_eq!(
@@ -3245,11 +3251,9 @@ mod tests {
             state.active_pane().entries.len() - 1
         );
 
+        // wraps from last to first
         state.dispatch_action(CommanderAction::MoveSelectionDown);
-        assert_eq!(
-            state.active_pane().selected_index,
-            state.active_pane().entries.len() - 1
-        );
+        assert_eq!(state.active_pane().selected_index, 0);
 
         state.dispatch_action(CommanderAction::MoveSelectionHome);
         assert_eq!(state.active_pane().selected_index, 0);
@@ -3390,6 +3394,7 @@ mod tests {
             sort_order: PaneSortOrder::default(),
             scroll_offset: 0.0,
             needs_scroll_to_selected: false,
+            cached_free_space: None,
             navigation_history: Vec::new(),
         };
 
@@ -3415,6 +3420,7 @@ mod tests {
             sort_order: PaneSortOrder::default(),
             scroll_offset: 420.0,
             needs_scroll_to_selected: false,
+            cached_free_space: None,
             navigation_history: Vec::new(),
         };
 
@@ -3427,14 +3433,18 @@ mod tests {
     }
 
     #[test]
-    fn selection_movement_requests_scroll_even_when_clamped_at_boundary() {
+    fn selection_movement_requests_scroll_when_wrapping_at_boundary() {
         let mut state = test_state();
         state.left_pane.selected_index = 0;
         state.left_pane.needs_scroll_to_selected = false;
 
         state.dispatch_action(CommanderAction::MoveSelectionUp);
 
-        assert_eq!(state.left_pane.selected_index, 0);
+        // wraps to last entry and requests scroll
+        assert_eq!(
+            state.left_pane.selected_index,
+            state.left_pane.entries.len() - 1
+        );
         assert!(state.left_pane.needs_scroll_to_selected);
     }
 
@@ -3518,8 +3528,7 @@ mod tests {
         state.dispatch_action(CommanderAction::CopyToOtherPane);
 
         assert_eq!(state.transfer_task_panes.len(), 1);
-        assert!(state.status.contains("in background"));
-        assert!(!state.status.contains("would use"));
+        assert!(matches!(state.dialog, DialogState::OperationProgress(_)));
 
         wait_for_state_tasks(&mut state);
         assert_eq!(
