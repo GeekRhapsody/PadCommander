@@ -2635,11 +2635,25 @@ impl TextInputDialogState {
 
     fn move_key_focus(&mut self, direction: FocusDirection) {
         match direction {
-            FocusDirection::Up => {
-                self.focused_row = self.focused_row.saturating_sub(1);
-            }
-            FocusDirection::Down => {
-                self.focused_row = (self.focused_row + 1).min(self.keys().len() - 1);
+            FocusDirection::Up | FocusDirection::Down => {
+                let old_row = self.focused_row;
+                let new_row = match direction {
+                    FocusDirection::Up => self.focused_row.saturating_sub(1),
+                    FocusDirection::Down => {
+                        (self.focused_row + 1).min(self.keys().len() - 1)
+                    }
+                    _ => unreachable!(),
+                };
+                if new_row != old_row {
+                    let current_x = key_row_centers(self.keys()[old_row])[self.focused_col];
+                    self.focused_col = key_row_centers(self.keys()[new_row])
+                        .iter()
+                        .enumerate()
+                        .min_by_key(|&(_, &cx)| (cx - current_x).unsigned_abs())
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    self.focused_row = new_row;
+                }
             }
             FocusDirection::Left => {
                 self.focused_col = self.focused_col.saturating_sub(1);
@@ -2710,6 +2724,20 @@ impl OnScreenKey {
             OnScreenKey::Cancel => "Cancel",
         }
     }
+
+    fn visual_width(self) -> u32 {
+        match self {
+            OnScreenKey::Space => 180,
+            OnScreenKey::Backspace
+            | OnScreenKey::Clear
+            | OnScreenKey::Confirm
+            | OnScreenKey::Cancel
+            | OnScreenKey::Shift
+            | OnScreenKey::Symbols => 92,
+            OnScreenKey::CursorLeft | OnScreenKey::CursorRight => 56,
+            OnScreenKey::Text(_) => 48,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2751,6 +2779,24 @@ impl TextInputPurpose {
                 | TextInputPurpose::ShortcutName
         )
     }
+}
+
+fn key_row_centers(row: &[OnScreenKey]) -> Vec<i32> {
+    const SPACING: u32 = 8;
+    let mut centers = Vec::with_capacity(row.len());
+    let mut x = 0u32;
+    for (i, key) in row.iter().enumerate() {
+        if i > 0 {
+            x += SPACING;
+        }
+        let w = key.visual_width();
+        centers.push((x + w / 2) as i32);
+        x += w;
+    }
+    // The renderer centers each row in the container, so we normalize all positions
+    // relative to the row's own midpoint. This makes cross-row comparisons meaningful.
+    let row_half = x as i32 / 2;
+    centers.iter().map(|&c| c - row_half).collect()
 }
 
 const LOWERCASE_KEYS: &[&[OnScreenKey]] = &[
