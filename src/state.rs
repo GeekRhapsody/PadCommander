@@ -149,22 +149,26 @@ impl AppState {
             CommanderAction::MoveSelectionUp => {
                 if self.move_command_menu_focus(SelectionMovement::Up) {
                     self.status = "Command menu focus moved.".to_owned();
-                } else {
+                } else if matches!(self.dialog, DialogState::None) {
                     self.move_active_selection(SelectionMovement::Up);
                 }
             }
             CommanderAction::MoveSelectionDown => {
                 if self.move_command_menu_focus(SelectionMovement::Down) {
                     self.status = "Command menu focus moved.".to_owned();
-                } else {
+                } else if matches!(self.dialog, DialogState::None) {
                     self.move_active_selection(SelectionMovement::Down)
                 }
             }
             CommanderAction::MoveSelectionPageUp => {
-                self.move_active_selection(SelectionMovement::PageUp)
+                if matches!(self.dialog, DialogState::None) {
+                    self.move_active_selection(SelectionMovement::PageUp)
+                }
             }
             CommanderAction::MoveSelectionPageDown => {
-                self.move_active_selection(SelectionMovement::PageDown);
+                if matches!(self.dialog, DialogState::None) {
+                    self.move_active_selection(SelectionMovement::PageDown);
+                }
             }
             CommanderAction::MoveSelectionHome => {
                 self.move_active_selection(SelectionMovement::Home)

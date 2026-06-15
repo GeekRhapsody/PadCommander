@@ -413,8 +413,6 @@ fn action_for_button(
         return match button {
             Button::South => Some(CommanderAction::OpenSelected),
             Button::East => Some(CommanderAction::Cancel),
-            Button::LeftTrigger => Some(CommanderAction::MoveSelectionPageUp),
-            Button::RightTrigger => Some(CommanderAction::MoveSelectionPageDown),
             _ => None,
         };
     }
