@@ -141,7 +141,7 @@ impl AppState {
                 self.status = format!("{} pane active.", self.active_pane_label());
             }
             CommanderAction::SwitchPane => {
-                if !matches!(self.dialog, DialogState::CommandMenu(_)) {
+                if matches!(self.dialog, DialogState::None) {
                     self.switch_active_pane();
                     self.status = format!("{} pane active.", self.active_pane_label());
                 }
@@ -1527,6 +1527,13 @@ impl AppState {
 
     pub fn settings_dialog_is_open(&self) -> bool {
         matches!(self.dialog, DialogState::Settings(_))
+    }
+
+    pub fn modal_is_active(&self) -> bool {
+        !matches!(
+            self.dialog,
+            DialogState::None | DialogState::TextInput(_) | DialogState::Settings(_)
+        )
     }
 
     pub fn can_create_shortcut_in_other_pane(&self) -> bool {

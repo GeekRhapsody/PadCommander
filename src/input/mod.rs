@@ -27,6 +27,7 @@ impl InputManager {
         ctx: &egui::Context,
         text_input_active: bool,
         settings_active: bool,
+        modal_active: bool,
     ) -> Vec<CommanderAction> {
         let now = Instant::now();
         let mut actions =
@@ -34,7 +35,7 @@ impl InputManager {
                 .collect_actions(ctx, now, text_input_active, settings_active);
         actions.extend(
             self.gamepad
-                .poll_actions(now, text_input_active, settings_active),
+                .poll_actions(now, text_input_active, settings_active, modal_active),
         );
         actions
     }
@@ -246,6 +247,7 @@ impl GamepadInputManager {
         now: Instant,
         text_input_active: bool,
         settings_active: bool,
+        modal_active: bool,
     ) -> Vec<CommanderAction> {
         let mut actions = Vec::new();
 
@@ -283,6 +285,7 @@ impl GamepadInputManager {
                             button,
                             text_input_active,
                             settings_active,
+                            modal_active,
                         ));
                     }
                 }
@@ -377,6 +380,7 @@ fn action_for_button(
     button: Button,
     text_input_active: bool,
     settings_active: bool,
+    modal_active: bool,
 ) -> Option<CommanderAction> {
     if text_input_active {
         return match button {
@@ -401,6 +405,16 @@ fn action_for_button(
             Button::DPadRight => Some(CommanderAction::AdjustFocusedSettingRight),
             Button::South | Button::Start => Some(CommanderAction::Confirm),
             Button::East => Some(CommanderAction::Cancel),
+            _ => None,
+        };
+    }
+
+    if modal_active {
+        return match button {
+            Button::South => Some(CommanderAction::OpenSelected),
+            Button::East => Some(CommanderAction::Cancel),
+            Button::LeftTrigger => Some(CommanderAction::MoveSelectionPageUp),
+            Button::RightTrigger => Some(CommanderAction::MoveSelectionPageDown),
             _ => None,
         };
     }
