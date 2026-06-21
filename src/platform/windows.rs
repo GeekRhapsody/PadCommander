@@ -1,7 +1,7 @@
 use eframe::egui;
 use std::path::PathBuf;
 use std::sync::Arc;
-use windows_sys::Win32::Storage::FileSystem::GetLogicalDrives;
+use windows_sys::Win32::Storage::FileSystem::{GetLogicalDrives, GetVolumeInformationW};
 use windows_sys::Win32::UI::Shell::{
     FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, SHFILEOPSTRUCTW, SHFileOperationW,
 };
@@ -49,6 +49,39 @@ pub fn logical_drive_roots() -> Vec<PathBuf> {
     }
 
     roots
+}
+
+pub fn get_volume_label(root: &std::path::Path) -> Option<String> {
+    let root_wide: Vec<u16> = {
+        use std::os::windows::ffi::OsStrExt;
+        root.as_os_str().encode_wide().chain([0]).collect()
+    };
+    let mut name_buf = vec![0u16; 256];
+
+    // SAFETY: root_wide is a valid NUL-terminated UTF-16 path; name_buf is a valid output buffer.
+    let ok = unsafe {
+        GetVolumeInformationW(
+            root_wide.as_ptr(),
+            name_buf.as_mut_ptr(),
+            name_buf.len() as u32,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+
+    if ok == 0 {
+        return None;
+    }
+
+    let len = name_buf.iter().position(|&c| c == 0).unwrap_or(name_buf.len());
+    if len == 0 {
+        return None;
+    }
+
+    String::from_utf16(&name_buf[..len]).ok()
 }
 
 #[cfg(windows)]

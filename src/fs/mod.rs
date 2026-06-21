@@ -160,9 +160,13 @@ fn list_drive_roots() -> Vec<FileEntry> {
     windows::logical_drive_roots()
         .into_iter()
         .map(|root| {
-            let display_name = root.to_string_lossy().to_string();
+            let letter = root.to_string_lossy().to_string();
+            let display_name = match windows::get_volume_label(&root) {
+                Some(label) => format!("{letter} ({label})"),
+                None => letter,
+            };
             FileEntry {
-                display_name: display_name.clone(),
+                display_name,
                 virtual_path: path_to_location(&root),
                 kind: FileEntryKind::Drive,
                 size: None,
