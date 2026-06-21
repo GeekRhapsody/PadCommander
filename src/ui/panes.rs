@@ -58,15 +58,39 @@ fn pane(
             ui.set_min_height(ui.available_height());
 
             ui.horizontal(|ui| {
-                ui.strong(&pane.title);
-                ui.separator();
-                ui.label(crate::fs::location_label(&pane.current_location));
-                ui.separator();
-                ui.label(format!("Marked: {}", pane.marked_summary().size_label()));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let indicator = if is_active { "ACTIVE" } else { "STANDBY" };
-                    ui.label(egui::RichText::new(indicator).color(accent).strong());
+                let marked_text = format!("Marked: {}", pane.marked_summary().size_label());
+                let font_id = egui::TextStyle::Body.resolve(ui.style());
+                let white = egui::Color32::WHITE;
+                // separator width + item spacing on each side
+                let sep_w = 1.0 + ui.spacing().item_spacing.x * 2.0;
+                let marked_w = ui.ctx().fonts_mut(|f| {
+                    f.layout_no_wrap(marked_text.clone(), font_id.clone(), white).size().x
                 });
+                let path_budget = (ui.available_width() - marked_w - sep_w).max(0.0);
+                let path = crate::fs::location_label(&pane.current_location);
+                let path_w = ui.ctx().fonts_mut(|f| {
+                    f.layout_no_wrap(path.to_string(), font_id.clone(), white).size().x
+                });
+                let display_path = if path_w <= path_budget {
+                    path.to_string()
+                } else {
+                    // Trim chars from the left until it fits (including the '…' prefix)
+                    let chars: Vec<char> = path.chars().collect();
+                    let mut start = 1;
+                    loop {
+                        let candidate: String = std::iter::once('…').chain(chars[start..].iter().copied()).collect();
+                        let w = ui.ctx().fonts_mut(|f| {
+                            f.layout_no_wrap(candidate.clone(), font_id.clone(), white).size().x
+                        });
+                        if w <= path_budget || start >= chars.len() - 1 {
+                            break candidate;
+                        }
+                        start += 1;
+                    }
+                };
+                ui.label(display_path);
+                ui.separator();
+                ui.label(marked_text);
             });
 
             pane_load_state(ui, &pane.load_state);
