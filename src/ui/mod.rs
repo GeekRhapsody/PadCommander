@@ -529,10 +529,13 @@ fn input_help_overlay(ctx: &egui::Context, state: &AppState, images: &ButtonImag
                 ))
                 .inner_margin(egui::Margin::same(18))
                 .show(ui, |ui| {
-                    ui.set_min_width(560.0);
                     ui.heading("Input Help");
                     ui.add_space(8.0);
-                    mapping_grid(ui, images);
+                    ui.horizontal_top(|ui| {
+                        mapping_grid_left(ui, images);
+                        ui.add_space(24.0);
+                        mapping_grid_right(ui, images);
+                    });
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         ui.label("F1 /");
@@ -545,8 +548,8 @@ fn input_help_overlay(ctx: &egui::Context, state: &AppState, images: &ButtonImag
         });
 }
 
-fn mapping_grid(ui: &mut egui::Ui, images: &ButtonImages) {
-    egui::Grid::new("input_help_mapping_grid")
+fn mapping_grid_left(ui: &mut egui::Ui, images: &ButtonImages) {
+    egui::Grid::new("input_help_grid_left")
         .num_columns(3)
         .spacing([18.0, 8.0])
         .striped(true)
@@ -570,6 +573,20 @@ fn mapping_grid(ui: &mut egui::Ui, images: &ButtonImages) {
             mapping_row_img(ui, "Create folder",           "F7",             |ui| btn(ui, images.north));
             mapping_row_img(ui, "Create file",             "Ctrl+N",         |ui| btn(ui, images.north));
             mapping_row_img(ui, "Create text file",        "Ctrl+T",         |ui| btn(ui, images.north));
+        });
+}
+
+fn mapping_grid_right(ui: &mut egui::Ui, images: &ButtonImages) {
+    egui::Grid::new("input_help_grid_right")
+        .num_columns(3)
+        .spacing([18.0, 8.0])
+        .striped(true)
+        .show(ui, |ui| {
+            ui.strong("Action");
+            ui.strong("Keyboard");
+            ui.strong("Gamepad");
+            ui.end_row();
+
             mapping_row_img(ui, "Delete",                  "F8 / Delete",    |ui| btn(ui, images.north));
             mapping_row_img(ui, "Refresh",                 "Ctrl+R",         |ui| btn(ui, images.north));
             mapping_row_img(ui, "Favourites",              "F3 / Ctrl+F",    |ui| btn(ui, images.l3));
