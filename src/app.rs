@@ -1,6 +1,12 @@
 use eframe::egui;
 
-use crate::{action::CommanderAction, input, state::AppState, ui::button_images::ButtonImages};
+use crate::{
+    action::CommanderAction,
+    input,
+    settings::ControllerOverride,
+    state::AppState,
+    ui::button_images::{ButtonImages, ControllerType},
+};
 
 pub const APP_TITLE: &str = "PadCommander";
 
@@ -48,7 +54,14 @@ impl eframe::App for PadCommanderApp {
             self.handle_action(&ctx, action);
         }
 
-        let button_images = ButtonImages::for_controller(self.input_manager.controller_type());
+        let effective_ct = match self.state.settings.controller_override {
+            ControllerOverride::Auto => self.input_manager.controller_type(),
+            ControllerOverride::Xbox => ControllerType::Xbox,
+            ControllerOverride::PlayStation4 => ControllerType::PlayStation4,
+            ControllerOverride::PlayStation5 => ControllerType::PlayStation5,
+            ControllerOverride::NintendoSwitch => ControllerType::NintendoSwitch,
+        };
+        let button_images = ButtonImages::for_controller(effective_ct);
         for action in crate::ui::show(ui, &self.state, &button_images) {
             self.handle_action(&ctx, action);
         }

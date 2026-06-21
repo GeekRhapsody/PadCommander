@@ -1316,6 +1316,7 @@ impl AppState {
                 SettingsModalFocus::UiScale => self.adjust_ui_scale(delta),
                 SettingsModalFocus::UseRecycleBin => self.toggle_use_recycle_bin(),
                 SettingsModalFocus::ShowHiddenFiles => self.toggle_show_hidden_files(),
+                SettingsModalFocus::ControllerOverride => self.cycle_controller_override(delta > 0.0),
                 SettingsModalFocus::Quit => {
                     self.status = "Press A / Enter to quit.".to_owned();
                 }
@@ -1334,6 +1335,7 @@ impl AppState {
             }
             SettingsModalFocus::UseRecycleBin => self.toggle_use_recycle_bin(),
             SettingsModalFocus::ShowHiddenFiles => self.toggle_show_hidden_files(),
+            SettingsModalFocus::ControllerOverride => self.cycle_controller_override(true),
             SettingsModalFocus::Quit => {
                 self.status = "Quit requested.".to_owned();
                 return DispatchResult {
@@ -1366,6 +1368,15 @@ impl AppState {
             "Delete will permanently remove files."
         };
         self.persist_settings(status);
+    }
+
+    fn cycle_controller_override(&mut self, forward: bool) {
+        let current = self.settings.controller_override;
+        self.settings.controller_override = if forward { current.next() } else { current.prev() };
+        self.persist_settings(&format!(
+            "Controller buttons: {}.",
+            self.settings.controller_override.label()
+        ));
     }
 
     fn toggle_show_hidden_files(&mut self) {
@@ -2060,7 +2071,7 @@ pub struct SettingsModalState {
 
 impl SettingsModalState {
     pub fn move_focus(&mut self, movement: SelectionMovement) {
-        const LAST_INDEX: usize = 3;
+        const LAST_INDEX: usize = 4;
 
         self.focused_index = match movement {
             SelectionMovement::Up | SelectionMovement::PageUp => {
@@ -2078,7 +2089,8 @@ impl SettingsModalState {
         match self.focused_index {
             1 => SettingsModalFocus::UseRecycleBin,
             2 => SettingsModalFocus::ShowHiddenFiles,
-            3 => SettingsModalFocus::Quit,
+            3 => SettingsModalFocus::ControllerOverride,
+            4 => SettingsModalFocus::Quit,
             _ => SettingsModalFocus::UiScale,
         }
     }
@@ -2089,6 +2101,7 @@ pub enum SettingsModalFocus {
     UiScale,
     UseRecycleBin,
     ShowHiddenFiles,
+    ControllerOverride,
     Quit,
 }
 

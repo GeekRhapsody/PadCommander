@@ -8,7 +8,7 @@ use eframe::egui;
 use crate::{
     action::CommanderAction,
     app::APP_TITLE,
-    settings,
+    settings::{self, ControllerOverride},
     state::{AppState, DialogState, SettingsModalFocus, TransferConflictState},
     tasks::{TaskId, TaskStatus},
 };
@@ -242,6 +242,26 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                     } else {
                                         "No"
                                     });
+                                },
+                            );
+                            ui.add_space(10.0);
+                            settings_row(
+                                ui,
+                                settings_modal.focused_setting()
+                                    == SettingsModalFocus::ControllerOverride,
+                                |ui| {
+                                    ui.strong("Controller Buttons");
+                                    ui.add_space(18.0);
+                                    if ui.button("◀").clicked() {
+                                        actions.push(CommanderAction::AdjustFocusedSettingLeft);
+                                    }
+                                    ui.label(state.settings.controller_override.label());
+                                    if ui.button("▶").clicked() {
+                                        actions.push(CommanderAction::AdjustFocusedSettingRight);
+                                    }
+                                    if state.settings.controller_override == ControllerOverride::Auto {
+                                        ui.label("(auto-detect)");
+                                    }
                                 },
                             );
                             ui.add_space(10.0);

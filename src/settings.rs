@@ -8,6 +8,48 @@ pub const MIN_UI_SCALE: f32 = 0.75;
 pub const MAX_UI_SCALE: f32 = 2.0;
 pub const UI_SCALE_STEP: f32 = 0.1;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ControllerOverride {
+    #[default]
+    Auto,
+    Xbox,
+    PlayStation4,
+    PlayStation5,
+    NintendoSwitch,
+}
+
+impl ControllerOverride {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto",
+            Self::Xbox => "Xbox",
+            Self::PlayStation4 => "PS4",
+            Self::PlayStation5 => "PS5",
+            Self::NintendoSwitch => "Nintendo",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Auto => Self::Xbox,
+            Self::Xbox => Self::PlayStation4,
+            Self::PlayStation4 => Self::PlayStation5,
+            Self::PlayStation5 => Self::NintendoSwitch,
+            Self::NintendoSwitch => Self::Auto,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Auto => Self::NintendoSwitch,
+            Self::Xbox => Self::Auto,
+            Self::PlayStation4 => Self::Xbox,
+            Self::PlayStation5 => Self::PlayStation4,
+            Self::NintendoSwitch => Self::PlayStation5,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
     pub ui_scale: f32,
@@ -15,6 +57,8 @@ pub struct Settings {
     pub use_recycle_bin: bool,
     #[serde(default)]
     pub show_hidden_files: bool,
+    #[serde(default)]
+    pub controller_override: ControllerOverride,
     #[serde(default)]
     pub favourites: Vec<String>,
     #[serde(default)]
@@ -29,6 +73,7 @@ impl Default for Settings {
             ui_scale: 1.0,
             use_recycle_bin: true,
             show_hidden_files: false,
+            controller_override: ControllerOverride::Auto,
             favourites: Vec::new(),
             last_left_pane_location: None,
             last_right_pane_location: None,
@@ -102,6 +147,7 @@ mod tests {
             ui_scale: 1.4,
             use_recycle_bin: false,
             show_hidden_files: true,
+            controller_override: ControllerOverride::PlayStation5,
             favourites: vec!["C:\\Games".to_owned(), "D:\\Downloads".to_owned()],
             last_left_pane_location: Some("C:\\Users".to_owned()),
             last_right_pane_location: Some("D:\\".to_owned()),
