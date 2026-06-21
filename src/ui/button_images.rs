@@ -128,6 +128,6 @@ impl ButtonImages {
 pub fn btn(ui: &mut egui::Ui, b: Btn) {
     ui.add(
         egui::Image::from_bytes(b.uri, b.bytes)
-            .fit_to_exact_size(egui::vec2(22.0, 22.0)),
+            .fit_to_exact_size(egui::vec2(34.0, 34.0)),
     );
 }
