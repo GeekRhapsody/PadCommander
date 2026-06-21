@@ -2,7 +2,10 @@ use eframe::egui;
 use gilrs::{Button, EventType, GamepadId, Gilrs};
 use std::time::{Duration, Instant};
 
-use crate::action::{CommanderAction, FocusDirection, TextInputAction};
+use crate::{
+    action::{CommanderAction, FocusDirection, TextInputAction},
+    ui::button_images::ControllerType,
+};
 
 pub const GAMEPAD_POLL_INTERVAL: Duration = Duration::from_millis(16);
 
@@ -20,6 +23,10 @@ impl InputManager {
             keyboard: KeyboardInputManager::default(),
             gamepad: GamepadInputManager::new(),
         }
+    }
+
+    pub fn controller_type(&self) -> ControllerType {
+        self.gamepad.controller_type()
     }
 
     pub fn collect_actions(
@@ -238,6 +245,7 @@ impl KeyboardInputManager {
 pub struct GamepadInputManager {
     gilrs: Option<Gilrs>,
     active_gamepad: Option<GamepadId>,
+    controller_type: ControllerType,
     dpad_up_held: bool,
     dpad_down_held: bool,
     dpad_left_held: bool,
@@ -253,6 +261,7 @@ impl GamepadInputManager {
         Self {
             gilrs: Gilrs::new().ok(),
             active_gamepad: None,
+            controller_type: ControllerType::default(),
             dpad_up_held: false,
             dpad_down_held: false,
             dpad_left_held: false,
@@ -262,6 +271,10 @@ impl GamepadInputManager {
             dpad_left: RepeatState::default(),
             dpad_right: RepeatState::default(),
         }
+    }
+
+    pub fn controller_type(&self) -> ControllerType {
+        self.controller_type
     }
 
     pub fn poll_actions(
@@ -318,6 +331,7 @@ impl GamepadInputManager {
                 }
                 EventType::Disconnected if self.active_gamepad == Some(event.id) => {
                     self.active_gamepad = None;
+                    self.controller_type = ControllerType::default();
                     self.dpad_up_held = false;
                     self.dpad_down_held = false;
                     self.dpad_left_held = false;
@@ -326,6 +340,10 @@ impl GamepadInputManager {
                 EventType::Disconnected => {}
                 EventType::Connected => {
                     self.active_gamepad = Some(event.id);
+                    if let Some(gilrs) = &self.gilrs {
+                        let name = gilrs.gamepad(event.id).name().to_owned();
+                        self.controller_type = ControllerType::from_gamepad_name(&name);
+                    }
                 }
                 _ => {}
             }

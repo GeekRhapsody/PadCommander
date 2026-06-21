@@ -1,3 +1,4 @@
+pub mod button_images;
 pub mod icons;
 pub mod panes;
 pub mod text_input;
@@ -12,7 +13,9 @@ use crate::{
     tasks::{TaskId, TaskStatus},
 };
 
-pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<CommanderAction> {
+use button_images::{btn, ButtonImages};
+
+pub fn show(ui: &mut egui::Ui, state: &AppState, images: &ButtonImages) -> Vec<CommanderAction> {
     let mut actions = Vec::new();
 
     egui::Panel::top("top_title")
@@ -34,9 +37,9 @@ pub fn show(ui: &mut egui::Ui, state: &AppState) -> Vec<CommanderAction> {
         .frame(panel_frame(egui::Color32::from_rgb(20, 22, 23)))
         .show_inside(ui, |ui| panes::show(ui, state, &mut actions));
 
-    input_help_overlay(ui.ctx(), state);
-    text_input::show(ui.ctx(), state, &mut actions);
-    modal_overlay(ui.ctx(), state, &mut actions);
+    input_help_overlay(ui.ctx(), state, images);
+    text_input::show(ui.ctx(), state, &mut actions, images);
+    modal_overlay(ui.ctx(), state, &mut actions, images);
 
     actions
 }
@@ -45,7 +48,7 @@ fn footer(ui: &mut egui::Ui, state: &AppState) {
     ui.label(&state.status);
 }
 
-fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<CommanderAction>) {
+fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<CommanderAction>, images: &ButtonImages) {
     let dialog = match &state.dialog {
         DialogState::Message { .. }
         | DialogState::DeleteConfirm(_)
@@ -125,7 +128,7 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 }
                             }
                             ui.add_space(8.0);
-                            ui.label("D-pad moves. A selects. B cancels.");
+                            gamepad_hint_move_select_cancel(ui, images);
                         }
                         DialogState::ShortcutConflict(confirm) => {
                             ui.heading("Overwrite Shortcut");
@@ -155,10 +158,10 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 }
                             }
                             ui.add_space(8.0);
-                            ui.label("D-pad moves. A selects. B cancels.");
+                            gamepad_hint_move_select_cancel(ui, images);
                         }
                         DialogState::TransferConflict(conflict) => {
-                            render_transfer_conflict(ui, conflict, actions);
+                            render_transfer_conflict(ui, conflict, actions, images);
                         }
                         DialogState::CommandMenu(menu) => {
                             ui.heading("Command Menu");
@@ -176,7 +179,7 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 }
                             }
                             ui.add_space(8.0);
-                            ui.label("D-pad moves. A selects. B cancels.");
+                            gamepad_hint_move_select_cancel(ui, images);
                         }
                         DialogState::Settings(settings_modal) => {
                             ui.heading("Settings");
@@ -256,7 +259,16 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                     actions.push(CommanderAction::QuitDevelopment);
                                 }
                             }
-                            ui.label("D-pad/arrow keys choose and change settings. A / Enter toggles. B / Esc closes.");
+                            ui.horizontal(|ui| {
+                                btn(ui, images.dpad_all);
+                                ui.label("choose/change");
+                                ui.label(" · ");
+                                btn(ui, images.south);
+                                ui.label("toggle");
+                                ui.label(" · ");
+                                btn(ui, images.east);
+                                ui.label("close");
+                            });
                         }
                         DialogState::Favourites(favourites) => {
                             ui.heading("Favourites");
@@ -300,7 +312,19 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                     actions.push(CommanderAction::Cancel);
                                 }
                             });
-                            ui.label("D-pad/arrow keys move. A / Enter opens. X / Space removes. B / Esc closes.");
+                            ui.horizontal(|ui| {
+                                btn(ui, images.dpad_all);
+                                ui.label("move");
+                                ui.label(" · ");
+                                btn(ui, images.south);
+                                ui.label("open");
+                                ui.label(" · ");
+                                btn(ui, images.west);
+                                ui.label("remove");
+                                ui.label(" · ");
+                                btn(ui, images.east);
+                                ui.label("close");
+                            });
                         }
                         DialogState::Decompress(decompress) => {
                             ui.heading("Decompress");
@@ -320,7 +344,16 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 }
                             }
                             ui.add_space(8.0);
-                            ui.label("D-pad/arrow keys move. A / Enter selects. B / Esc cancels.");
+                            ui.horizontal(|ui| {
+                                btn(ui, images.dpad_all);
+                                ui.label("move");
+                                ui.label(" · ");
+                                btn(ui, images.south);
+                                ui.label("select");
+                                ui.label(" · ");
+                                btn(ui, images.east);
+                                ui.label("cancel");
+                            });
                         }
                         DialogState::SortBy(sort_by) => {
                             ui.heading("Sort By");
@@ -338,10 +371,19 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 }
                             }
                             ui.add_space(8.0);
-                            ui.label("D-pad/arrow keys move. A / Enter selects. B / Esc cancels.");
+                            ui.horizontal(|ui| {
+                                btn(ui, images.dpad_all);
+                                ui.label("move");
+                                ui.label(" · ");
+                                btn(ui, images.south);
+                                ui.label("select");
+                                ui.label(" · ");
+                                btn(ui, images.east);
+                                ui.label("cancel");
+                            });
                         }
                         DialogState::OperationProgress(task_id) => {
-                            render_operation_progress(ui, state, *task_id, actions);
+                            render_operation_progress(ui, state, *task_id, actions, images);
                         }
                         DialogState::None | DialogState::TextInput(_) => {}
                     }
@@ -354,6 +396,7 @@ fn render_operation_progress(
     state: &AppState,
     task_id: TaskId,
     actions: &mut Vec<CommanderAction>,
+    images: &ButtonImages,
 ) {
     let Some(task) = state.task_manager.task_by_id(task_id) else {
         ui.heading("Operation");
@@ -422,7 +465,8 @@ fn render_operation_progress(
             if ui.button("Close").clicked() {
                 actions.push(CommanderAction::Confirm);
             }
-            ui.label("A / Enter closes.");
+            btn(ui, images.south);
+            ui.label("close");
         } else if task.cancellable {
             if task.cancellation_requested {
                 ui.add_enabled(false, egui::Button::new("Cancelling..."));
@@ -430,13 +474,14 @@ fn render_operation_progress(
                 if ui.button("Cancel").clicked() {
                     actions.push(CommanderAction::CancelActiveTask);
                 }
-                ui.label("B / Esc cancels.");
+                btn(ui, images.east);
+                ui.label("cancel");
             }
         }
     });
 }
 
-fn input_help_overlay(ctx: &egui::Context, state: &AppState) {
+fn input_help_overlay(ctx: &egui::Context, state: &AppState, images: &ButtonImages) {
     if !state.show_input_help {
         return;
     }
@@ -467,14 +512,20 @@ fn input_help_overlay(ctx: &egui::Context, state: &AppState) {
                     ui.set_min_width(560.0);
                     ui.heading("Input Help");
                     ui.add_space(8.0);
-                    mapping_grid(ui);
+                    mapping_grid(ui, images);
                     ui.add_space(8.0);
-                    ui.label("F1 / View toggles this overlay. Esc / B closes it.");
+                    ui.horizontal(|ui| {
+                        ui.label("F1 /");
+                        btn(ui, images.select);
+                        ui.label("toggles this overlay  · Esc /");
+                        btn(ui, images.east);
+                        ui.label("closes it");
+                    });
                 });
         });
 }
 
-fn mapping_grid(ui: &mut egui::Ui) {
+fn mapping_grid(ui: &mut egui::Ui, images: &ButtonImages) {
     egui::Grid::new("input_help_mapping_grid")
         .num_columns(3)
         .spacing([18.0, 8.0])
@@ -485,33 +536,33 @@ fn mapping_grid(ui: &mut egui::Ui) {
             ui.strong("Gamepad");
             ui.end_row();
 
-            mapping_row(ui, "Move selection", "Up / Down", "D-Pad Up / Down");
-            mapping_row(ui, "Page up / down", "Page Up / Down", "LB / RB");
-            mapping_row(ui, "Jump to start / end", "Home / End", "—");
-            mapping_row(ui, "Switch pane", "Tab", "D-Pad Left / Right");
-            mapping_row(ui, "Parent folder", "Backspace", "—");
-            mapping_row(ui, "Open / confirm", "Enter", "A");
-            mapping_row(ui, "Cancel / back", "Esc", "B");
-            mapping_row(ui, "Toggle mark", "Space", "X");
-            mapping_row(ui, "Rename", "F2", "Command menu");
-            mapping_row(ui, "Copy to other pane", "F5", "Command menu");
-            mapping_row(ui, "Move to other pane", "F6", "Command menu");
-            mapping_row(ui, "Create folder", "F7", "Command menu");
-            mapping_row(ui, "Create file", "Ctrl+N", "Command menu");
-            mapping_row(ui, "Create text file", "Ctrl+T", "Command menu");
-            mapping_row(ui, "Delete", "F8 / Delete", "Command menu");
-            mapping_row(ui, "Refresh", "Ctrl+R", "Command menu");
-            mapping_row(ui, "Favourites", "F3 / Ctrl+F", "L3");
-            mapping_row(ui, "Command menu", "—", "Y");
-            mapping_row(ui, "Settings", "—", "Start");
-            mapping_row(ui, "Input help", "F1", "Select");
-            mapping_row(ui, "OSK: navigate", "Arrow keys", "D-Pad");
-            mapping_row(ui, "OSK: press key", "Type normally", "A");
-            mapping_row(ui, "OSK: backspace", "Backspace", "X");
-            mapping_row(ui, "OSK: symbols layer", "—", "Y");
-            mapping_row(ui, "OSK: cursor left / right", "← →", "LB / RB");
-            mapping_row(ui, "OSK: submit", "Enter", "Start");
-            mapping_row(ui, "OSK: cancel", "Esc", "B");
+            mapping_row_img(ui, "Move selection",          "Up / Down",      |ui| { btn(ui, images.dpad_up); btn(ui, images.dpad_down); });
+            mapping_row_img(ui, "Page up / down",          "Page Up / Down", |ui| { btn(ui, images.lb); btn(ui, images.rb); });
+            mapping_row(ui,     "Jump to start / end",     "Home / End",     "—");
+            mapping_row_img(ui, "Switch pane",             "Tab",            |ui| { btn(ui, images.dpad_left); btn(ui, images.dpad_right); });
+            mapping_row(ui,     "Parent folder",           "Backspace",      "—");
+            mapping_row_img(ui, "Open / confirm",          "Enter",          |ui| btn(ui, images.south));
+            mapping_row_img(ui, "Cancel / back",           "Esc",            |ui| btn(ui, images.east));
+            mapping_row_img(ui, "Toggle mark",             "Space",          |ui| btn(ui, images.west));
+            mapping_row_img(ui, "Rename",                  "F2",             |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Copy to other pane",      "F5",             |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Move to other pane",      "F6",             |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Create folder",           "F7",             |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Create file",             "Ctrl+N",         |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Create text file",        "Ctrl+T",         |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Delete",                  "F8 / Delete",    |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Refresh",                 "Ctrl+R",         |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Favourites",              "F3 / Ctrl+F",    |ui| btn(ui, images.l3));
+            mapping_row_img(ui, "Command menu",            "—",              |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Settings",                "—",              |ui| btn(ui, images.start));
+            mapping_row_img(ui, "Input help",              "F1",             |ui| btn(ui, images.select));
+            mapping_row_img(ui, "OSK: navigate",           "Arrow keys",     |ui| btn(ui, images.dpad_all));
+            mapping_row_img(ui, "OSK: press key",          "Type normally",  |ui| btn(ui, images.south));
+            mapping_row_img(ui, "OSK: backspace",          "Backspace",      |ui| btn(ui, images.west));
+            mapping_row_img(ui, "OSK: symbols layer",      "—",              |ui| btn(ui, images.north));
+            mapping_row_img(ui, "OSK: cursor left / right","← →",            |ui| { btn(ui, images.lb); btn(ui, images.rb); });
+            mapping_row_img(ui, "OSK: submit",             "Enter",          |ui| btn(ui, images.start));
+            mapping_row_img(ui, "OSK: cancel",             "Esc",            |ui| btn(ui, images.east));
         });
 }
 
@@ -539,6 +590,26 @@ fn mapping_row(ui: &mut egui::Ui, action: &str, keyboard: &str, gamepad: &str) {
     ui.end_row();
 }
 
+fn mapping_row_img(ui: &mut egui::Ui, action: &str, keyboard: &str, gamepad_ui: impl FnOnce(&mut egui::Ui)) {
+    ui.label(action);
+    ui.label(keyboard);
+    ui.horizontal(gamepad_ui);
+    ui.end_row();
+}
+
+fn gamepad_hint_move_select_cancel(ui: &mut egui::Ui, images: &ButtonImages) {
+    ui.horizontal(|ui| {
+        btn(ui, images.dpad_all);
+        ui.label("move");
+        ui.label(" · ");
+        btn(ui, images.south);
+        ui.label("select");
+        ui.label(" · ");
+        btn(ui, images.east);
+        ui.label("cancel");
+    });
+}
+
 fn panel_frame(fill: egui::Color32) -> egui::Frame {
     egui::Frame::new()
         .fill(fill)
@@ -549,6 +620,7 @@ fn render_transfer_conflict(
     ui: &mut egui::Ui,
     conflict: &TransferConflictState,
     actions: &mut Vec<CommanderAction>,
+    images: &ButtonImages,
 ) {
     let verb = match conflict.kind {
         crate::tasks::TaskKind::Copy => "Copy",
@@ -581,5 +653,5 @@ fn render_transfer_conflict(
         }
     }
     ui.add_space(8.0);
-    ui.label("D-pad moves. A selects. B cancels.");
+    gamepad_hint_move_select_cancel(ui, images);
 }

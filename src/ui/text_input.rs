@@ -3,9 +3,10 @@ use eframe::egui;
 use crate::{
     action::{CommanderAction, TextInputAction},
     state::{AppState, DialogState, KeyboardLayer, OnScreenKey, TextInputDialogState},
+    ui::button_images::{btn, ButtonImages},
 };
 
-pub fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<CommanderAction>) {
+pub fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<CommanderAction>, images: &ButtonImages) {
     let DialogState::TextInput(dialog) = &state.dialog else {
         return;
     };
@@ -32,7 +33,7 @@ pub fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<CommanderAc
                     egui::Color32::from_rgb(132, 184, 153),
                 ))
                 .inner_margin(egui::Margin::same(18))
-                .show(ui, |ui| text_input_dialog(ui, dialog, actions));
+                .show(ui, |ui| text_input_dialog(ui, dialog, actions, images));
         });
 }
 
@@ -40,6 +41,7 @@ fn text_input_dialog(
     ui: &mut egui::Ui,
     dialog: &TextInputDialogState,
     actions: &mut Vec<CommanderAction>,
+    images: &ButtonImages,
 ) {
     ui.set_min_width(720.0);
     ui.heading(&dialog.title);
@@ -71,19 +73,27 @@ fn text_input_dialog(
     ui.horizontal(|ui| {
         ui.label(layer_label(dialog.layer));
         ui.separator();
-        ui.label("D-pad: focus");
+        btn(ui, images.dpad_all);
+        ui.label("focus");
         ui.separator();
-        ui.label("A: key");
+        btn(ui, images.south);
+        ui.label("key");
         ui.separator();
-        ui.label("B: cancel");
+        btn(ui, images.east);
+        ui.label("cancel");
         ui.separator();
-        ui.label("X: backspace");
+        btn(ui, images.west);
+        ui.label("backspace");
         ui.separator();
-        ui.label("Y: symbols");
+        btn(ui, images.north);
+        ui.label("symbols");
         ui.separator();
-        ui.label("LB/RB: cursor");
+        btn(ui, images.lb);
+        btn(ui, images.rb);
+        ui.label("cursor");
         ui.separator();
-        ui.label("Start: confirm");
+        btn(ui, images.start);
+        ui.label("confirm");
     });
 }
 

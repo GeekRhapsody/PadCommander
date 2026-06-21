@@ -1,6 +1,6 @@
 use eframe::egui;
 
-use crate::{action::CommanderAction, input, state::AppState};
+use crate::{action::CommanderAction, input, state::AppState, ui::button_images::ButtonImages};
 
 pub const APP_TITLE: &str = "PadCommander";
 
@@ -14,6 +14,7 @@ impl PadCommanderApp {
         let state = AppState::new();
         apply_ui_scale(&cc.egui_ctx, state.settings.ui_scale);
         configure_visuals(&cc.egui_ctx);
+        egui_extras::install_image_loaders(&cc.egui_ctx);
 
         Self {
             state,
@@ -47,7 +48,8 @@ impl eframe::App for PadCommanderApp {
             self.handle_action(&ctx, action);
         }
 
-        for action in crate::ui::show(ui, &self.state) {
+        let button_images = ButtonImages::for_controller(self.input_manager.controller_type());
+        for action in crate::ui::show(ui, &self.state, &button_images) {
             self.handle_action(&ctx, action);
         }
 
