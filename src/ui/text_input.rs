@@ -3,6 +3,7 @@ use eframe::egui;
 use crate::{
     action::{CommanderAction, TextInputAction},
     state::{AppState, DialogState, KeyboardLayer, OnScreenKey, TextInputDialogState},
+    theme::ThemeColors,
     ui::button_images::{btn, ButtonImages},
 };
 
@@ -11,6 +12,7 @@ pub fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<CommanderAc
         return;
     };
 
+    let tc = ThemeColors::for_theme(state.settings.theme);
     let screen_rect = ctx.content_rect();
     let painter = ctx.layer_painter(egui::LayerId::new(
         egui::Order::Foreground,
@@ -27,13 +29,10 @@ pub fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<CommanderAc
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ctx, |ui| {
             egui::Frame::new()
-                .fill(egui::Color32::from_rgb(35, 39, 40))
-                .stroke(egui::Stroke::new(
-                    1.0,
-                    egui::Color32::from_rgb(132, 184, 153),
-                ))
+                .fill(tc.text_input_fill)
+                .stroke(egui::Stroke::new(1.0, tc.modal_border))
                 .inner_margin(egui::Margin::same(18))
-                .show(ui, |ui| text_input_dialog(ui, dialog, actions, images));
+                .show(ui, |ui| text_input_dialog(ui, dialog, actions, images, &tc));
         });
 }
 
@@ -42,14 +41,15 @@ fn text_input_dialog(
     dialog: &TextInputDialogState,
     actions: &mut Vec<CommanderAction>,
     images: &ButtonImages,
+    tc: &ThemeColors,
 ) {
     ui.set_min_width(720.0);
     ui.heading(&dialog.title);
     ui.add_space(8.0);
 
     egui::Frame::new()
-        .fill(egui::Color32::from_rgb(24, 27, 28))
-        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 88, 90)))
+        .fill(tc.text_input_field_fill)
+        .stroke(egui::Stroke::new(1.0, tc.text_input_field_border))
         .inner_margin(egui::Margin::same(10))
         .show(ui, |ui| {
             ui.add_sized(
@@ -68,7 +68,7 @@ fn text_input_dialog(
     }
 
     ui.add_space(12.0);
-    on_screen_keyboard(ui, dialog, actions);
+    on_screen_keyboard(ui, dialog, actions, tc);
     ui.add_space(10.0);
     ui.horizontal(|ui| {
         ui.label(layer_label(dialog.layer));
@@ -101,6 +101,7 @@ fn on_screen_keyboard(
     ui: &mut egui::Ui,
     dialog: &TextInputDialogState,
     actions: &mut Vec<CommanderAction>,
+    tc: &ThemeColors,
 ) {
     for (row_index, row) in dialog.keys().iter().enumerate() {
         let item_spacing = ui.spacing().item_spacing.x;
@@ -116,8 +117,8 @@ fn on_screen_keyboard(
                 let mut button = egui::Button::new(key.label());
                 if focused {
                     button = button
-                        .fill(egui::Color32::from_rgb(73, 104, 94))
-                        .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE));
+                        .fill(tc.focused_fill)
+                        .stroke(egui::Stroke::new(2.0, tc.focused_stroke));
                 }
 
                 if ui.add_sized(key_size(*key), button).clicked() {

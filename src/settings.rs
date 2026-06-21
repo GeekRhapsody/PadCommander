@@ -50,6 +50,33 @@ impl ControllerOverride {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Theme {
+    #[default]
+    Dark,
+    Light,
+}
+
+impl Theme {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Dark => "Dark",
+            Self::Light => "Light",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Dark => Self::Light,
+            Self::Light => Self::Dark,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        self.next()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
     pub ui_scale: f32,
@@ -65,6 +92,8 @@ pub struct Settings {
     pub last_left_pane_location: Option<String>,
     #[serde(default)]
     pub last_right_pane_location: Option<String>,
+    #[serde(default)]
+    pub theme: Theme,
 }
 
 impl Default for Settings {
@@ -77,6 +106,7 @@ impl Default for Settings {
             favourites: Vec::new(),
             last_left_pane_location: None,
             last_right_pane_location: None,
+            theme: Theme::Dark,
         }
     }
 }
@@ -151,6 +181,7 @@ mod tests {
             favourites: vec!["C:\\Games".to_owned(), "D:\\Downloads".to_owned()],
             last_left_pane_location: Some("C:\\Users".to_owned()),
             last_right_pane_location: Some("D:\\".to_owned()),
+            theme: Theme::Light,
         };
 
         let json = serde_json::to_string(&settings).expect("serialize settings");
@@ -178,9 +209,11 @@ mod tests {
             ui_scale: 99.0,
             use_recycle_bin: true,
             show_hidden_files: false,
+            controller_override: ControllerOverride::Auto,
             favourites: vec!["B".to_owned(), "A".to_owned(), "A".to_owned()],
             last_left_pane_location: None,
             last_right_pane_location: None,
+            theme: Theme::Dark,
         }
         .sanitize();
 

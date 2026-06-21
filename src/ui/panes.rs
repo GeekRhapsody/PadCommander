@@ -3,6 +3,7 @@ use eframe::egui;
 use crate::{
     action::CommanderAction,
     state::{AppState, FileEntry, PaneLoadState, PaneSide, PaneState},
+    theme::ThemeColors,
     ui::icons,
 };
 
@@ -14,6 +15,7 @@ const ROW_HEIGHT: f32 = 24.0;
 const ENTRY_ROW_HEIGHT: f32 = 38.0;
 
 pub fn show(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<CommanderAction>) {
+    let tc = ThemeColors::for_theme(state.settings.theme);
     ui.columns(2, |columns| {
         pane(
             &mut columns[0],
@@ -21,6 +23,7 @@ pub fn show(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<CommanderActi
             &state.left_pane,
             state.active_pane == PaneSide::Left,
             actions,
+            &tc,
         );
         pane(
             &mut columns[1],
@@ -28,6 +31,7 @@ pub fn show(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<CommanderActi
             &state.right_pane,
             state.active_pane == PaneSide::Right,
             actions,
+            &tc,
         );
     });
 }
@@ -38,15 +42,16 @@ fn pane(
     pane: &PaneState,
     is_active: bool,
     actions: &mut Vec<CommanderAction>,
+    tc: &ThemeColors,
 ) {
     let accent = if is_active {
-        egui::Color32::from_rgb(132, 184, 153)
+        tc.pane_active_accent
     } else {
-        egui::Color32::from_rgb(82, 88, 90)
+        tc.pane_inactive_accent
     };
 
     egui::Frame::new()
-        .fill(egui::Color32::from_rgb(34, 37, 39))
+        .fill(tc.pane_bg)
         .stroke(egui::Stroke::new(if is_active { 2.0 } else { 1.0 }, accent))
         .inner_margin(egui::Margin::same(10))
         .show(ui, |ui| {
@@ -154,16 +159,16 @@ fn pane(
                 painter.rect_filled(
                     scrollbar_rect,
                     3.0,
-                    egui::Color32::from_rgb(44, 47, 50),
+                    tc.scrollbar_track,
                 );
                 let thumb_color = if thumb_response.is_pointer_button_down_on()
                     || thumb_response.dragged()
                 {
-                    egui::Color32::from_rgb(120, 130, 135)
+                    tc.scrollbar_thumb_active
                 } else if thumb_response.hovered() {
-                    egui::Color32::from_rgb(100, 110, 115)
+                    tc.scrollbar_thumb_hover
                 } else {
-                    egui::Color32::from_rgb(75, 82, 86)
+                    tc.scrollbar_thumb
                 };
                 painter.rect_filled(thumb_rect, 3.0, thumb_color);
             }
@@ -194,6 +199,7 @@ fn pane(
                     viewport_in_content,
                     row_pitch,
                     row_layout,
+                    tc,
                 );
             }
 
@@ -224,6 +230,7 @@ fn show_visible_rows(
     viewport: egui::Rect,
     row_pitch: f32,
     row_layout: RowLayout,
+    tc: &ThemeColors,
 ) {
     let spacing = ui.spacing().item_spacing;
     ui.set_height((row_pitch * pane.entries.len() as f32 - spacing.y).max(0.0));
@@ -248,18 +255,18 @@ fn show_visible_rows(
             let marked = pane.marked_items.contains(&entry.virtual_path);
             let disabled = !entry.is_available_source();
             let fill = if selected {
-                egui::Color32::from_rgb(59, 78, 73)
+                tc.row_selected
             } else if marked {
-                egui::Color32::from_rgb(58, 52, 35)
+                tc.row_marked
             } else if disabled {
-                egui::Color32::from_rgb(28, 30, 31)
+                tc.row_disabled
             } else if index % 2 == 0 {
-                egui::Color32::from_rgb(38, 42, 43)
+                tc.row_even
             } else {
-                egui::Color32::from_rgb(32, 35, 36)
+                tc.row_odd
             };
 
-            paint_entry_row(ui, row_layout, entry, selected, marked, disabled, fill);
+            paint_entry_row(ui, row_layout, entry, selected, marked, disabled, fill, tc);
         }
     });
 }
@@ -363,6 +370,7 @@ fn paint_entry_row(
     marked: bool,
     disabled: bool,
     fill: egui::Color32,
+    tc: &ThemeColors,
 ) {
     let row_rect = egui::Rect::from_min_size(
         ui.cursor().min,
@@ -378,6 +386,7 @@ fn paint_entry_row(
         selected,
         marked,
         disabled,
+        tc,
     );
     ui.advance_cursor_after_rect(row_rect);
 }
@@ -405,16 +414,15 @@ fn paint_row_contents(
     selected: bool,
     marked: bool,
     disabled: bool,
+    tc: &ThemeColors,
 ) {
     let name = if marked {
         format!("* {}", entry.display_name)
     } else {
         entry.display_name.clone()
     };
-    let text_color = if disabled {
-        egui::Color32::WHITE
-    } else if selected {
-        egui::Color32::WHITE
+    let text_color = if disabled || selected {
+        tc.text
     } else {
         ui.visuals().text_color()
     };

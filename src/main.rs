@@ -8,6 +8,7 @@ mod input;
 mod platform;
 mod settings;
 mod state;
+mod theme;
 mod tasks;
 mod ui;
 

@@ -1317,6 +1317,7 @@ impl AppState {
                 SettingsModalFocus::UseRecycleBin => self.toggle_use_recycle_bin(),
                 SettingsModalFocus::ShowHiddenFiles => self.toggle_show_hidden_files(),
                 SettingsModalFocus::ControllerOverride => self.cycle_controller_override(delta > 0.0),
+                SettingsModalFocus::Theme => self.cycle_theme(delta > 0.0),
                 SettingsModalFocus::Quit => {
                     self.status = "Press A / Enter to quit.".to_owned();
                 }
@@ -1336,6 +1337,7 @@ impl AppState {
             SettingsModalFocus::UseRecycleBin => self.toggle_use_recycle_bin(),
             SettingsModalFocus::ShowHiddenFiles => self.toggle_show_hidden_files(),
             SettingsModalFocus::ControllerOverride => self.cycle_controller_override(true),
+            SettingsModalFocus::Theme => self.cycle_theme(true),
             SettingsModalFocus::Quit => {
                 self.status = "Quit requested.".to_owned();
                 return DispatchResult {
@@ -1377,6 +1379,12 @@ impl AppState {
             "Controller buttons: {}.",
             self.settings.controller_override.label()
         ));
+    }
+
+    fn cycle_theme(&mut self, forward: bool) {
+        let current = self.settings.theme;
+        self.settings.theme = if forward { current.next() } else { current.prev() };
+        self.persist_settings(&format!("Theme: {}.", self.settings.theme.label()));
     }
 
     fn toggle_show_hidden_files(&mut self) {
@@ -2071,7 +2079,7 @@ pub struct SettingsModalState {
 
 impl SettingsModalState {
     pub fn move_focus(&mut self, movement: SelectionMovement) {
-        const LAST_INDEX: usize = 4;
+        const LAST_INDEX: usize = 5;
 
         self.focused_index = match movement {
             SelectionMovement::Up | SelectionMovement::PageUp => {
@@ -2090,7 +2098,8 @@ impl SettingsModalState {
             1 => SettingsModalFocus::UseRecycleBin,
             2 => SettingsModalFocus::ShowHiddenFiles,
             3 => SettingsModalFocus::ControllerOverride,
-            4 => SettingsModalFocus::Quit,
+            4 => SettingsModalFocus::Theme,
+            5 => SettingsModalFocus::Quit,
             _ => SettingsModalFocus::UiScale,
         }
     }
@@ -2102,6 +2111,7 @@ pub enum SettingsModalFocus {
     UseRecycleBin,
     ShowHiddenFiles,
     ControllerOverride,
+    Theme,
     Quit,
 }
 

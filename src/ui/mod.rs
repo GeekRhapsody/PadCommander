@@ -11,16 +11,18 @@ use crate::{
     settings::{self, ControllerOverride},
     state::{AppState, DialogState, SettingsModalFocus, TransferConflictState},
     tasks::{TaskId, TaskStatus},
+    theme::ThemeColors,
 };
 
 use button_images::{btn, ButtonImages};
 
 pub fn show(ui: &mut egui::Ui, state: &AppState, images: &ButtonImages) -> Vec<CommanderAction> {
     let mut actions = Vec::new();
+    let tc = ThemeColors::for_theme(state.settings.theme);
 
     egui::Panel::top("top_title")
         .exact_size(40.0)
-        .frame(panel_frame(egui::Color32::from_rgb(31, 35, 34)))
+        .frame(panel_frame(tc.top_bottom_panel))
         .show_inside(ui, |ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space(2.0);
@@ -30,16 +32,16 @@ pub fn show(ui: &mut egui::Ui, state: &AppState, images: &ButtonImages) -> Vec<C
 
     egui::Panel::bottom("bottom_status")
         .exact_size(30.0)
-        .frame(panel_frame(egui::Color32::from_rgb(31, 35, 34)))
+        .frame(panel_frame(tc.top_bottom_panel))
         .show_inside(ui, |ui| footer(ui, state));
 
     egui::CentralPanel::default()
-        .frame(panel_frame(egui::Color32::from_rgb(20, 22, 23)))
+        .frame(panel_frame(tc.central_panel))
         .show_inside(ui, |ui| panes::show(ui, state, &mut actions));
 
-    input_help_overlay(ui.ctx(), state, images);
+    input_help_overlay(ui.ctx(), state, images, &tc);
     text_input::show(ui.ctx(), state, &mut actions, images);
-    modal_overlay(ui.ctx(), state, &mut actions, images);
+    modal_overlay(ui.ctx(), state, &mut actions, images, &tc);
 
     actions
 }
@@ -48,7 +50,7 @@ fn footer(ui: &mut egui::Ui, state: &AppState) {
     ui.label(&state.status);
 }
 
-fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<CommanderAction>, images: &ButtonImages) {
+fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<CommanderAction>, images: &ButtonImages, tc: &ThemeColors) {
     let dialog = match &state.dialog {
         DialogState::Message { .. }
         | DialogState::DeleteConfirm(_)
@@ -79,11 +81,8 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ctx, |ui| {
             egui::Frame::new()
-                .fill(egui::Color32::from_rgb(38, 42, 43))
-                .stroke(egui::Stroke::new(
-                    1.0,
-                    egui::Color32::from_rgb(132, 184, 153),
-                ))
+                .fill(tc.modal_fill)
+                .stroke(egui::Stroke::new(1.0, tc.modal_border))
                 .inner_margin(egui::Margin::same(16))
                 .show(ui, |ui| {
                     ui.set_min_width(480.0);
@@ -116,8 +115,8 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 let mut button = egui::Button::new(*label);
                                 if focused {
                                     button = button
-                                        .fill(egui::Color32::from_rgb(73, 104, 94))
-                                        .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE));
+                                        .fill(tc.focused_fill)
+                                        .stroke(egui::Stroke::new(2.0, tc.focused_stroke));
                                 }
                                 if ui.add_sized([ui.available_width(), 34.0], button).clicked() {
                                     if index == 0 {
@@ -146,8 +145,8 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 let mut button = egui::Button::new(*label);
                                 if focused {
                                     button = button
-                                        .fill(egui::Color32::from_rgb(73, 104, 94))
-                                        .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE));
+                                        .fill(tc.focused_fill)
+                                        .stroke(egui::Stroke::new(2.0, tc.focused_stroke));
                                 }
                                 if ui.add_sized([ui.available_width(), 34.0], button).clicked() {
                                     if index == 0 {
@@ -161,7 +160,7 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                             gamepad_hint_move_select_cancel(ui, images);
                         }
                         DialogState::TransferConflict(conflict) => {
-                            render_transfer_conflict(ui, conflict, actions, images);
+                            render_transfer_conflict(ui, conflict, actions, images, tc);
                         }
                         DialogState::CommandMenu(menu) => {
                             ui.heading("Command Menu");
@@ -171,8 +170,8 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 let mut button = egui::Button::new(entry.label);
                                 if focused {
                                     button = button
-                                        .fill(egui::Color32::from_rgb(73, 104, 94))
-                                        .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE));
+                                        .fill(tc.focused_fill)
+                                        .stroke(egui::Stroke::new(2.0, tc.focused_stroke));
                                 }
                                 if ui.add_sized([ui.available_width(), 34.0], button).clicked() {
                                     actions.push(entry.action.clone());
@@ -187,6 +186,7 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                             settings_row(
                                 ui,
                                 settings_modal.focused_setting() == SettingsModalFocus::UiScale,
+                                tc,
                                 |ui| {
                                     ui.strong("UI scale");
                                     ui.add_space(18.0);
@@ -211,6 +211,7 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 ui,
                                 settings_modal.focused_setting()
                                     == SettingsModalFocus::UseRecycleBin,
+                                tc,
                                 |ui| {
                                     ui.strong("Use Recycle Bin");
                                     ui.add_space(18.0);
@@ -230,6 +231,7 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 ui,
                                 settings_modal.focused_setting()
                                     == SettingsModalFocus::ShowHiddenFiles,
+                                tc,
                                 |ui| {
                                     ui.strong("Show Hidden Files");
                                     ui.add_space(18.0);
@@ -249,6 +251,7 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 ui,
                                 settings_modal.focused_setting()
                                     == SettingsModalFocus::ControllerOverride,
+                                tc,
                                 |ui| {
                                     ui.strong("Controller Buttons");
                                     ui.add_space(18.0);
@@ -264,6 +267,23 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                     }
                                 },
                             );
+                            ui.add_space(10.0);
+                            settings_row(
+                                ui,
+                                settings_modal.focused_setting() == SettingsModalFocus::Theme,
+                                tc,
+                                |ui| {
+                                    ui.strong("Theme");
+                                    ui.add_space(18.0);
+                                    if ui.button("◀").clicked() {
+                                        actions.push(CommanderAction::AdjustFocusedSettingLeft);
+                                    }
+                                    ui.label(state.settings.theme.label());
+                                    if ui.button("▶").clicked() {
+                                        actions.push(CommanderAction::AdjustFocusedSettingRight);
+                                    }
+                                },
+                            );
                             ui.add_space(8.0);
                             {
                                 let focused = settings_modal.focused_setting() == SettingsModalFocus::Quit;
@@ -271,8 +291,8 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                     .stroke(egui::Stroke::new(2.0, egui::Color32::TRANSPARENT));
                                 if focused {
                                     button = button
-                                        .fill(egui::Color32::from_rgb(73, 104, 94))
-                                        .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE));
+                                        .fill(tc.focused_fill)
+                                        .stroke(egui::Stroke::new(2.0, tc.focused_stroke));
                                 }
                                 if ui.add_sized([260.0, 34.0], button).clicked() {
                                     actions.push(CommanderAction::QuitDevelopment);
@@ -308,8 +328,8 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                     let mut button = egui::Button::new(label);
                                     if focused {
                                         button = button
-                                            .fill(egui::Color32::from_rgb(73, 104, 94))
-                                            .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE));
+                                            .fill(tc.focused_fill)
+                                            .stroke(egui::Stroke::new(2.0, tc.focused_stroke));
                                     }
                                     if ui.add_sized([420.0, 34.0], button).clicked() {
                                         actions.push(CommanderAction::FocusFavourite(index));
@@ -355,8 +375,8 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 let mut button = egui::Button::new(choice.label(&decompress.archive_stem));
                                 if focused {
                                     button = button
-                                        .fill(egui::Color32::from_rgb(73, 104, 94))
-                                        .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE));
+                                        .fill(tc.focused_fill)
+                                        .stroke(egui::Stroke::new(2.0, tc.focused_stroke));
                                 }
                                 if ui.add_sized([360.0, 34.0], button).clicked() {
                                     actions.push(CommanderAction::FocusDecompressOption(index));
@@ -383,8 +403,8 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 let mut button = egui::Button::new(sort_order.label());
                                 if focused {
                                     button = button
-                                        .fill(egui::Color32::from_rgb(73, 104, 94))
-                                        .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE));
+                                        .fill(tc.focused_fill)
+                                        .stroke(egui::Stroke::new(2.0, tc.focused_stroke));
                                 }
                                 if ui.add_sized([320.0, 34.0], button).clicked() {
                                     actions.push(CommanderAction::SelectSortOrder(*sort_order));
@@ -403,7 +423,7 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                             });
                         }
                         DialogState::OperationProgress(task_id) => {
-                            render_operation_progress(ui, state, *task_id, actions, images);
+                            render_operation_progress(ui, state, *task_id, actions, images, tc);
                         }
                         DialogState::None | DialogState::TextInput(_) => {}
                     }
@@ -417,6 +437,7 @@ fn render_operation_progress(
     task_id: TaskId,
     actions: &mut Vec<CommanderAction>,
     images: &ButtonImages,
+    tc: &ThemeColors,
 ) {
     let Some(task) = state.task_manager.task_by_id(task_id) else {
         ui.heading("Operation");
@@ -431,10 +452,10 @@ fn render_operation_progress(
         ui.heading(task.kind.label());
         if done {
             let status_color = match task.status {
-                TaskStatus::Succeeded => egui::Color32::from_rgb(132, 184, 153),
+                TaskStatus::Succeeded => tc.accent,
                 TaskStatus::Failed => egui::Color32::LIGHT_RED,
                 TaskStatus::Cancelled => egui::Color32::from_rgb(220, 184, 110),
-                _ => egui::Color32::WHITE,
+                _ => tc.text,
             };
             ui.colored_label(status_color, format!("— {}", task.status.label()));
         }
@@ -501,7 +522,7 @@ fn render_operation_progress(
     });
 }
 
-fn input_help_overlay(ctx: &egui::Context, state: &AppState, images: &ButtonImages) {
+fn input_help_overlay(ctx: &egui::Context, state: &AppState, images: &ButtonImages, tc: &ThemeColors) {
     if !state.show_input_help {
         return;
     }
@@ -522,11 +543,8 @@ fn input_help_overlay(ctx: &egui::Context, state: &AppState, images: &ButtonImag
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ctx, |ui| {
             egui::Frame::new()
-                .fill(egui::Color32::from_rgb(34, 38, 39))
-                .stroke(egui::Stroke::new(
-                    1.0,
-                    egui::Color32::from_rgb(132, 184, 153),
-                ))
+                .fill(tc.input_help_fill)
+                .stroke(egui::Stroke::new(1.0, tc.modal_border))
                 .inner_margin(egui::Margin::same(18))
                 .show(ui, |ui| {
                     ui.heading("Input Help");
@@ -603,11 +621,11 @@ fn mapping_grid_right(ui: &mut egui::Ui, images: &ButtonImages) {
         });
 }
 
-fn settings_row(ui: &mut egui::Ui, focused: bool, add_contents: impl FnOnce(&mut egui::Ui)) {
+fn settings_row(ui: &mut egui::Ui, focused: bool, tc: &ThemeColors, add_contents: impl FnOnce(&mut egui::Ui)) {
     let frame = if focused {
         egui::Frame::new()
-            .fill(egui::Color32::from_rgb(73, 104, 94))
-            .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE))
+            .fill(tc.focused_fill)
+            .stroke(egui::Stroke::new(2.0, tc.focused_stroke))
             .inner_margin(egui::Margin::same(6))
     } else {
         egui::Frame::new()
@@ -658,6 +676,7 @@ fn render_transfer_conflict(
     conflict: &TransferConflictState,
     actions: &mut Vec<CommanderAction>,
     images: &ButtonImages,
+    tc: &ThemeColors,
 ) {
     let verb = match conflict.kind {
         crate::tasks::TaskKind::Copy => "Copy",
@@ -678,8 +697,8 @@ fn render_transfer_conflict(
         let mut button = egui::Button::new(*label);
         if focused {
             button = button
-                .fill(egui::Color32::from_rgb(73, 104, 94))
-                .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE));
+                .fill(tc.focused_fill)
+                .stroke(egui::Stroke::new(2.0, tc.focused_stroke));
         }
         if ui.add_sized([ui.available_width(), 34.0], button).clicked() {
             if index == 0 {

@@ -3,8 +3,9 @@ use eframe::egui;
 use crate::{
     action::CommanderAction,
     input,
-    settings::ControllerOverride,
+    settings::{ControllerOverride, Theme},
     state::AppState,
+    theme::ThemeColors,
     ui::button_images::{ButtonImages, ControllerType},
 };
 
@@ -19,7 +20,7 @@ impl PadCommanderApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let state = AppState::new();
         apply_ui_scale(&cc.egui_ctx, state.settings.ui_scale);
-        configure_visuals(&cc.egui_ctx);
+        configure_visuals(&cc.egui_ctx, state.settings.theme);
         egui_extras::install_image_loaders(&cc.egui_ctx);
 
         Self {
@@ -41,6 +42,7 @@ impl eframe::App for PadCommanderApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         apply_ui_scale(&ctx, self.state.settings.ui_scale);
+        configure_visuals(&ctx, self.state.settings.theme);
         self.state.poll_tasks();
 
         let actions = self.input_manager.collect_actions(
@@ -74,13 +76,17 @@ fn apply_ui_scale(ctx: &egui::Context, ui_scale: f32) {
     ctx.set_pixels_per_point(ui_scale.max(0.5));
 }
 
-fn configure_visuals(ctx: &egui::Context) {
-    let mut visuals = egui::Visuals::dark();
-    visuals.panel_fill = egui::Color32::from_rgb(24, 26, 28);
-    visuals.window_fill = egui::Color32::from_rgb(31, 33, 36);
-    visuals.faint_bg_color = egui::Color32::from_rgb(37, 41, 42);
-    visuals.selection.bg_fill = egui::Color32::from_rgb(66, 96, 89);
-    visuals.hyperlink_color = egui::Color32::from_rgb(132, 184, 153);
-    visuals.override_text_color = Some(egui::Color32::WHITE);
+fn configure_visuals(ctx: &egui::Context, theme: Theme) {
+    let tc = ThemeColors::for_theme(theme);
+    let mut visuals = match theme {
+        Theme::Dark => egui::Visuals::dark(),
+        Theme::Light => egui::Visuals::light(),
+    };
+    visuals.panel_fill = tc.panel_fill;
+    visuals.window_fill = tc.window_fill;
+    visuals.faint_bg_color = tc.faint_bg;
+    visuals.selection.bg_fill = tc.selection_bg;
+    visuals.hyperlink_color = tc.accent;
+    visuals.override_text_color = Some(tc.text);
     ctx.set_visuals(visuals);
 }
