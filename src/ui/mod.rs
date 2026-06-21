@@ -331,7 +331,7 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                             .fill(tc.focused_fill)
                                             .stroke(egui::Stroke::new(2.0, tc.focused_stroke));
                                     }
-                                    if ui.add_sized([420.0, 34.0], button).clicked() {
+                                    if ui.add_sized([ui.available_width(), 34.0], button).clicked() {
                                         actions.push(CommanderAction::FocusFavourite(index));
                                         actions.push(CommanderAction::OpenFocusedFavourite);
                                     }
@@ -339,25 +339,14 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                             }
                             ui.add_space(10.0);
                             ui.horizontal(|ui| {
-                                if ui.button("Add Current").clicked() {
-                                    actions.push(CommanderAction::AddFavourite);
-                                }
-                                if ui.button("Remove").clicked() {
-                                    actions.push(CommanderAction::RemoveFavourite);
-                                }
-                                if ui.button("Open").clicked() {
-                                    actions.push(CommanderAction::OpenFocusedFavourite);
-                                }
-                                if ui.button("Close").clicked() {
-                                    actions.push(CommanderAction::Cancel);
-                                }
-                            });
-                            ui.horizontal(|ui| {
                                 btn(ui, images.dpad_all);
                                 ui.label("move");
                                 ui.label(" · ");
                                 btn(ui, images.south);
                                 ui.label("open");
+                                ui.label(" · ");
+                                btn(ui, images.north);
+                                ui.label("add");
                                 ui.label(" · ");
                                 btn(ui, images.west);
                                 ui.label("remove");

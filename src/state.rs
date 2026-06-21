@@ -1544,6 +1544,10 @@ impl AppState {
         matches!(self.dialog, DialogState::Settings(_))
     }
 
+    pub fn favourites_dialog_is_open(&self) -> bool {
+        matches!(self.dialog, DialogState::Favourites(_))
+    }
+
     pub fn modal_is_active(&self) -> bool {
         !matches!(
             self.dialog,

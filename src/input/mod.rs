@@ -34,6 +34,7 @@ impl InputManager {
         ctx: &egui::Context,
         text_input_active: bool,
         settings_active: bool,
+        favourites_active: bool,
         modal_active: bool,
         input_help_active: bool,
     ) -> Vec<CommanderAction> {
@@ -49,6 +50,7 @@ impl InputManager {
             now,
             text_input_active,
             settings_active,
+            favourites_active,
             modal_active,
             input_help_active,
         ));
@@ -282,6 +284,7 @@ impl GamepadInputManager {
         now: Instant,
         text_input_active: bool,
         settings_active: bool,
+        favourites_active: bool,
         modal_active: bool,
         input_help_active: bool,
     ) -> Vec<CommanderAction> {
@@ -321,6 +324,7 @@ impl GamepadInputManager {
                             button,
                             text_input_active,
                             settings_active,
+                            favourites_active,
                             modal_active,
                             input_help_active,
                         ));
@@ -422,6 +426,7 @@ fn action_for_button(
     button: Button,
     text_input_active: bool,
     settings_active: bool,
+    favourites_active: bool,
     modal_active: bool,
     input_help_active: bool,
 ) -> Option<CommanderAction> {
@@ -456,6 +461,16 @@ fn action_for_button(
             Button::DPadRight => Some(CommanderAction::AdjustFocusedSettingRight),
             Button::South | Button::Start => Some(CommanderAction::Confirm),
             Button::East => Some(CommanderAction::Cancel),
+            _ => None,
+        };
+    }
+
+    if favourites_active {
+        return match button {
+            Button::South => Some(CommanderAction::OpenFocusedFavourite),
+            Button::East => Some(CommanderAction::Cancel),
+            Button::West => Some(CommanderAction::RemoveFavourite),
+            Button::North => Some(CommanderAction::AddFavourite),
             _ => None,
         };
     }
