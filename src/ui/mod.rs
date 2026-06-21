@@ -264,7 +264,6 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                     }
                                 },
                             );
-                            ui.add_space(10.0);
                             ui.add_space(8.0);
                             {
                                 let focused = settings_modal.focused_setting() == SettingsModalFocus::Quit;
@@ -279,6 +278,7 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                     actions.push(CommanderAction::QuitDevelopment);
                                 }
                             }
+                            ui.add_space(10.0);
                             ui.horizontal(|ui| {
                                 btn(ui, images.dpad_all);
                                 ui.label("choose/change");
