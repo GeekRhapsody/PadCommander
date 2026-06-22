@@ -412,7 +412,7 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                             });
                         }
                         DialogState::OperationProgress(task_id) => {
-                            render_operation_progress(ui, state, *task_id, actions, images, tc);
+                            render_operation_progress(ui, state, *task_id, images, tc);
                         }
                         DialogState::None | DialogState::TextInput(_) => {}
                     }
@@ -424,7 +424,6 @@ fn render_operation_progress(
     ui: &mut egui::Ui,
     state: &AppState,
     task_id: TaskId,
-    actions: &mut Vec<CommanderAction>,
     images: &ButtonImages,
     tc: &ThemeColors,
 ) {
@@ -489,26 +488,23 @@ fn render_operation_progress(
         }
     }
 
-    ui.add_space(12.0);
-    ui.horizontal(|ui| {
-        if done {
-            if ui.button("Close").clicked() {
-                actions.push(CommanderAction::Confirm);
-            }
+    if done {
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
             btn(ui, images.south);
             ui.label("close");
-        } else if task.cancellable {
+        });
+    } else if task.cancellable {
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
             if task.cancellation_requested {
-                ui.add_enabled(false, egui::Button::new("Cancelling..."));
+                ui.label("cancelling...");
             } else {
-                if ui.button("Cancel").clicked() {
-                    actions.push(CommanderAction::CancelActiveTask);
-                }
                 btn(ui, images.east);
                 ui.label("cancel");
             }
-        }
-    });
+        });
+    }
 }
 
 fn input_help_overlay(ctx: &egui::Context, state: &AppState, images: &ButtonImages, tc: &ThemeColors) {

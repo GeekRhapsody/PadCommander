@@ -105,8 +105,8 @@ impl AppState {
         let mut state = Self {
             settings,
             settings_path,
-            left_pane: PaneState::new("Left Pane", left_location),
-            right_pane: PaneState::new("Right Pane", right_location),
+            left_pane: PaneState::new(left_location),
+            right_pane: PaneState::new(right_location),
             active_pane: PaneSide::Left,
             status: "Ready. F1 or View opens input help. Ctrl+Q quits during development."
                 .to_owned(),
@@ -1582,7 +1582,6 @@ impl AppState {
 
 #[derive(Clone, Debug)]
 pub struct PaneState {
-    pub title: String,
     pub current_location: String,
     pub entries: Vec<FileEntry>,
     pub selected_index: usize,
@@ -1596,9 +1595,8 @@ pub struct PaneState {
 }
 
 impl PaneState {
-    fn new(title: &str, location: String) -> Self {
+    fn new(location: String) -> Self {
         Self {
-            title: title.to_owned(),
             current_location: location,
             entries: Vec::new(),
             selected_index: 0,
@@ -3112,7 +3110,6 @@ mod tests {
             settings: Settings::default(),
             settings_path: std::env::temp_dir().join("pad_commander_test_settings.json"),
             left_pane: PaneState {
-                title: "Left".to_owned(),
                 current_location: fs::ROOTS_LOCATION.to_owned(),
                 entries: vec![test_entry("a"), test_entry("b"), test_entry("c")],
                 selected_index: 1,
@@ -3125,7 +3122,6 @@ mod tests {
                 navigation_history: Vec::new(),
             },
             right_pane: PaneState {
-                title: "Right".to_owned(),
                 current_location: fs::ROOTS_LOCATION.to_owned(),
                 entries: vec![test_entry("x"), test_entry("y"), test_entry("z")],
                 selected_index: 1,
@@ -3490,7 +3486,6 @@ mod tests {
     #[test]
     fn restore_selection_keeps_matching_path_when_refreshing_entries() {
         let mut pane = PaneState {
-            title: "Test".to_owned(),
             current_location: fs::ROOTS_LOCATION.to_owned(),
             entries: vec![test_entry("a"), test_entry("b"), test_entry("c")],
             selected_index: 1,
@@ -3516,7 +3511,6 @@ mod tests {
     #[test]
     fn restore_selection_requests_scroll_when_selection_falls_back_to_top() {
         let mut pane = PaneState {
-            title: "Test".to_owned(),
             current_location: fs::ROOTS_LOCATION.to_owned(),
             entries: vec![test_entry("missing")],
             selected_index: 0,
