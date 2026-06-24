@@ -633,7 +633,7 @@ fn mapping_row(ui: &mut egui::Ui, action: &str, keyboard: &str, gamepad: &str) {
 fn mapping_row_img(ui: &mut egui::Ui, action: &str, keyboard: &str, gamepad_ui: impl FnOnce(&mut egui::Ui)) {
     ui.label(action);
     ui.label(keyboard);
-    ui.horizontal(gamepad_ui);
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), gamepad_ui);
     ui.end_row();
 }
 
