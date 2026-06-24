@@ -71,6 +71,7 @@ fn text_input_dialog(
     on_screen_keyboard(ui, dialog, actions, tc);
     ui.add_space(10.0);
     ui.horizontal(|ui| {
+        ui.set_height(34.0);
         ui.label(layer_label(dialog.layer));
         ui.separator();
         btn(ui, images.dpad_all);
