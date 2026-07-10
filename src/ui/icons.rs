@@ -23,14 +23,15 @@ fn paint_file_by_ext(painter: &Painter, rect: Rect, path: &str) {
         .and_then(|e| e.to_str())
         .map(|e| e.to_ascii_lowercase());
     match ext.as_deref() {
-        Some("png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "svg" | "tiff" | "tif"
-            | "ico") => paint_image_file(painter, rect),
+        Some("png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "svg" | "tiff" | "tif" | "ico") => {
+            paint_image_file(painter, rect)
+        }
         Some("mp4" | "mkv" | "avi" | "mov" | "wmv") => paint_video(painter, rect),
         Some("cbz" | "cbr" | "cb7") => paint_comic(painter, rect),
         Some("exe" | "dll" | "so" | "sys") => paint_executable(painter, rect),
         Some(
-            "rs" | "py" | "js" | "ts" | "c" | "cpp" | "cxx" | "cc" | "h" | "hpp" | "sh"
-            | "bash" | "ps1" | "bat" | "cmd" | "lua",
+            "rs" | "py" | "js" | "ts" | "c" | "cpp" | "cxx" | "cc" | "h" | "hpp" | "sh" | "bash"
+            | "ps1" | "bat" | "cmd" | "lua",
         ) => paint_script(painter, rect),
         Some("pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "odt") => {
             paint_document(painter, rect)
@@ -60,11 +61,29 @@ fn paint_folder(painter: &Painter, rect: Rect, color: Color32) {
     let tab_w = w * 0.45;
     let tab_h = h * 0.22;
     let tab = Rect::from_min_size(min, Vec2::new(tab_w, tab_h + 1.0));
-    painter.rect_filled(tab, CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, color);
+    painter.rect_filled(
+        tab,
+        CornerRadius {
+            nw: 2,
+            ne: 2,
+            sw: 0,
+            se: 0,
+        },
+        color,
+    );
 
     let body_min = Pos2::new(min.x, min.y + tab_h);
     let body = Rect::from_min_size(body_min, Vec2::new(w, h - tab_h));
-    painter.rect_filled(body, CornerRadius { nw: 0, ne: 2, sw: 2, se: 2 }, color);
+    painter.rect_filled(
+        body,
+        CornerRadius {
+            nw: 0,
+            ne: 2,
+            sw: 2,
+            se: 2,
+        },
+        color,
+    );
 }
 
 fn paint_file(painter: &Painter, rect: Rect, color: Color32) {
@@ -123,7 +142,10 @@ fn paint_archive(painter: &Painter, rect: Rect) {
         } else {
             (cx, cx + tooth)
         };
-        painter.line_segment([Pos2::new(x0, y), Pos2::new(x1, y)], Stroke::new(1.0, zip_color));
+        painter.line_segment(
+            [Pos2::new(x0, y), Pos2::new(x1, y)],
+            Stroke::new(1.0, zip_color),
+        );
         y += 2.2;
         go_left = !go_left;
     }
@@ -230,7 +252,11 @@ fn paint_comic(painter: &Painter, rect: Rect) {
         Pos2::new(tail_cx + 2.5, by2),
         Pos2::new(tail_cx - 1.0, rect.max.y - 1.5),
     ];
-    painter.add(Shape::convex_polygon(tail_pts, Color32::WHITE, Stroke::NONE));
+    painter.add(Shape::convex_polygon(
+        tail_pts,
+        Color32::WHITE,
+        Stroke::NONE,
+    ));
 }
 
 fn paint_shortcut(painter: &Painter, rect: Rect) {
@@ -287,7 +313,11 @@ fn paint_document(painter: &Painter, rect: Rect) {
     let gap = (rect.height() - top + rect.min.y - 1.5) / 4.0;
     for i in 0u8..4 {
         let y = top + i as f32 * gap;
-        let x2 = if i == 3 { lx1 + (lx2_full - lx1) * 0.6 } else { lx2_full };
+        let x2 = if i == 3 {
+            lx1 + (lx2_full - lx1) * 0.6
+        } else {
+            lx2_full
+        };
         painter.line_segment([Pos2::new(lx1, y), Pos2::new(x2, y)], stroke);
     }
 }
@@ -312,8 +342,14 @@ fn paint_gear(painter: &Painter, rect: Rect, color: Color32, bg: Color32) {
         let (ca, sa) = (angle.cos(), angle.sin());
         let (px, py) = (-sa, ca); // perpendicular direction
 
-        let p1 = Pos2::new(cx + R_BODY * ca + TOOTH_HW * px, cy + R_BODY * sa + TOOTH_HW * py);
-        let p2 = Pos2::new(cx + R_BODY * ca - TOOTH_HW * px, cy + R_BODY * sa - TOOTH_HW * py);
+        let p1 = Pos2::new(
+            cx + R_BODY * ca + TOOTH_HW * px,
+            cy + R_BODY * sa + TOOTH_HW * py,
+        );
+        let p2 = Pos2::new(
+            cx + R_BODY * ca - TOOTH_HW * px,
+            cy + R_BODY * sa - TOOTH_HW * py,
+        );
         let p3 = Pos2::new(
             cx + (R_BODY + TOOTH_H) * ca - TOOTH_HW * px,
             cy + (R_BODY + TOOTH_H) * sa - TOOTH_HW * py,
@@ -322,7 +358,11 @@ fn paint_gear(painter: &Painter, rect: Rect, color: Color32, bg: Color32) {
             cx + (R_BODY + TOOTH_H) * ca + TOOTH_HW * px,
             cy + (R_BODY + TOOTH_H) * sa + TOOTH_HW * py,
         );
-        painter.add(Shape::convex_polygon(vec![p1, p2, p3, p4], color, Stroke::NONE));
+        painter.add(Shape::convex_polygon(
+            vec![p1, p2, p3, p4],
+            color,
+            Stroke::NONE,
+        ));
     }
 
     painter.circle_filled(Pos2::new(cx, cy), R_HOLE, bg);
@@ -334,10 +374,7 @@ fn paint_drive(painter: &Painter, rect: Rect) {
     let h = rect.height();
     let min = rect.min;
 
-    let disk = Rect::from_min_size(
-        Pos2::new(min.x, min.y + h * 0.2),
-        Vec2::new(w, h * 0.6),
-    );
+    let disk = Rect::from_min_size(Pos2::new(min.x, min.y + h * 0.2), Vec2::new(w, h * 0.6));
     painter.rect_filled(disk, CornerRadius::same(3), color);
 
     painter.circle_filled(

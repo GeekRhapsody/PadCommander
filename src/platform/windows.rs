@@ -76,7 +76,10 @@ pub fn get_volume_label(root: &std::path::Path) -> Option<String> {
         return None;
     }
 
-    let len = name_buf.iter().position(|&c| c == 0).unwrap_or(name_buf.len());
+    let len = name_buf
+        .iter()
+        .position(|&c| c == 0)
+        .unwrap_or(name_buf.len());
     if len == 0 {
         return None;
     }

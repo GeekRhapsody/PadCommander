@@ -79,7 +79,11 @@ impl ArchiveService for LocalArchiveService {
             Ok(ArchiveFormat::SevenZip | ArchiveFormat::Rar) => {
                 match find_command(&["7z", "7za", "7zz"]) {
                     Some(tool) => external_extract_archive(
-                        reporter, tool, archive_path, destination, password,
+                        reporter,
+                        tool,
+                        archive_path,
+                        destination,
+                        password,
                     ),
                     None => unarc_extract_archive(reporter, archive_path, destination, password),
                 }
@@ -261,7 +265,8 @@ impl<W: Write> Write for ProgressWriter<'_, W> {
         }
         let n = self.inner.write(buf)?;
         self.tracker.add_bytes(n as u64);
-        self.reporter.progress(self.tracker.snapshot(self.output_path));
+        self.reporter
+            .progress(self.tracker.snapshot(self.output_path));
         Ok(n)
     }
 
@@ -371,10 +376,7 @@ fn unarc_extract_archive(
         Ok(archive) => archive,
         Err(error) => {
             destination_cleanup.clean_up(&destination);
-            return TaskOutcome::Failed(format!(
-                "Cannot open {}: {error}",
-                archive_path.display()
-            ));
+            return TaskOutcome::Failed(format!("Cannot open {}: {error}", archive_path.display()));
         }
     };
 
@@ -382,7 +384,6 @@ fn unarc_extract_archive(
         bytes: plan.total_bytes,
         items: plan.entries.len() as u64,
     });
-
 
     let mut plan_idx = 0;
     loop {
@@ -424,10 +425,7 @@ fn unarc_extract_archive(
         if let Some(parent) = plan_entry.output_path.parent() {
             if let Err(error) = fs::create_dir_all(parent) {
                 destination_cleanup.clean_up(&destination);
-                return TaskOutcome::Failed(format!(
-                    "Cannot create {}: {error}",
-                    parent.display()
-                ));
+                return TaskOutcome::Failed(format!("Cannot create {}: {error}", parent.display()));
             }
         }
 
@@ -634,7 +632,6 @@ fn external_create_archive(
     })
 }
 
-
 fn external_extract_archive(
     reporter: TaskReporter,
     tool: PathBuf,
@@ -642,11 +639,10 @@ fn external_extract_archive(
     destination: PathBuf,
     password: Option<String>,
 ) -> TaskOutcome {
-    let entries =
-        match seven_zip_list_entries(&tool, &archive_path, password.as_deref()) {
-            Ok(entries) => entries,
-            Err(error) => return TaskOutcome::Failed(error),
-        };
+    let entries = match seven_zip_list_entries(&tool, &archive_path, password.as_deref()) {
+        Ok(entries) => entries,
+        Err(error) => return TaskOutcome::Failed(error),
+    };
 
     for entry in &entries {
         if let Err(error) = safe_archive_output_path(&destination, entry) {
@@ -898,7 +894,6 @@ fn run_command_waiting(
         }
     }
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ArchiveCreatePlan {

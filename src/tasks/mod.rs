@@ -361,7 +361,13 @@ impl TaskManager {
         target_directory: PathBuf,
     ) -> TaskId {
         self.spawn_threaded(TaskKind::Copy, label, true, move |reporter| {
-            local_transfer_task(reporter, LocalTransferKind::Copy, sources, target_directory, false)
+            local_transfer_task(
+                reporter,
+                LocalTransferKind::Copy,
+                sources,
+                target_directory,
+                false,
+            )
         })
     }
 
@@ -372,7 +378,13 @@ impl TaskManager {
         target_directory: PathBuf,
     ) -> TaskId {
         self.spawn_threaded(TaskKind::Copy, label, true, move |reporter| {
-            local_transfer_task(reporter, LocalTransferKind::Copy, sources, target_directory, true)
+            local_transfer_task(
+                reporter,
+                LocalTransferKind::Copy,
+                sources,
+                target_directory,
+                true,
+            )
         })
     }
 
@@ -383,7 +395,13 @@ impl TaskManager {
         target_directory: PathBuf,
     ) -> TaskId {
         self.spawn_threaded(TaskKind::Move, label, true, move |reporter| {
-            local_transfer_task(reporter, LocalTransferKind::Move, sources, target_directory, false)
+            local_transfer_task(
+                reporter,
+                LocalTransferKind::Move,
+                sources,
+                target_directory,
+                false,
+            )
         })
     }
 
@@ -394,7 +412,13 @@ impl TaskManager {
         target_directory: PathBuf,
     ) -> TaskId {
         self.spawn_threaded(TaskKind::Move, label, true, move |reporter| {
-            local_transfer_task(reporter, LocalTransferKind::Move, sources, target_directory, true)
+            local_transfer_task(
+                reporter,
+                LocalTransferKind::Move,
+                sources,
+                target_directory,
+                true,
+            )
         })
     }
 
@@ -859,7 +883,11 @@ struct LocalTransferPlan {
 }
 
 impl LocalTransferPlan {
-    fn new(sources: Vec<PathBuf>, target_directory: PathBuf, overwrite: bool) -> Result<Self, String> {
+    fn new(
+        sources: Vec<PathBuf>,
+        target_directory: PathBuf,
+        overwrite: bool,
+    ) -> Result<Self, String> {
         if !target_directory.is_dir() {
             return Err(format!(
                 "Target {} is not a directory.",
@@ -1386,7 +1414,8 @@ mod tests {
         write_bytes(&source, 3);
         write_bytes(&target.join("source.txt"), 2);
 
-        let error = LocalTransferPlan::new(vec![source], target, false).expect_err("target conflict");
+        let error =
+            LocalTransferPlan::new(vec![source], target, false).expect_err("target conflict");
 
         assert!(error.contains("already exists"));
         fs::remove_dir_all(&root).expect("remove test dir");

@@ -14,7 +14,7 @@ use crate::{
     theme::ThemeColors,
 };
 
-use button_images::{btn, ButtonImages};
+use button_images::{ButtonImages, btn};
 
 pub fn show(ui: &mut egui::Ui, state: &AppState, images: &ButtonImages) -> Vec<CommanderAction> {
     let mut actions = Vec::new();
@@ -50,7 +50,13 @@ fn footer(ui: &mut egui::Ui, state: &AppState) {
     ui.label(&state.status);
 }
 
-fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<CommanderAction>, images: &ButtonImages, tc: &ThemeColors) {
+fn modal_overlay(
+    ctx: &egui::Context,
+    state: &AppState,
+    actions: &mut Vec<CommanderAction>,
+    images: &ButtonImages,
+    tc: &ThemeColors,
+) {
     let dialog = match &state.dialog {
         DialogState::Message { .. }
         | DialogState::DeleteConfirm(_)
@@ -102,10 +108,7 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 ));
                             } else {
                                 ui.heading("Permanently Delete");
-                                ui.label(format!(
-                                    "Permanently delete {} {}?",
-                                    count, items_label
-                                ));
+                                ui.label(format!("Permanently delete {} {}?", count, items_label));
                             }
                             let examples_label = if count == 1 { "File" } else { "Examples" };
                             ui.label(format!("{}: {}", examples_label, confirm.examples()));
@@ -135,10 +138,7 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                 "{} already exists.",
                                 confirm.shortcut_path().display()
                             ));
-                            ui.label(format!(
-                                "Target: {}",
-                                confirm.target_path().display()
-                            ));
+                            ui.label(format!("Target: {}", confirm.target_path().display()));
                             ui.add_space(8.0);
                             for (index, label) in ["Overwrite", "Cancel"].iter().enumerate() {
                                 let focused = index == confirm.focused_index;
@@ -262,7 +262,9 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                     if ui.button("▶").clicked() {
                                         actions.push(CommanderAction::AdjustFocusedSettingRight);
                                     }
-                                    if state.settings.controller_override == ControllerOverride::Auto {
+                                    if state.settings.controller_override
+                                        == ControllerOverride::Auto
+                                    {
                                         ui.label("(auto-detect)");
                                     }
                                 },
@@ -286,7 +288,8 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                             );
                             ui.add_space(8.0);
                             {
-                                let focused = settings_modal.focused_setting() == SettingsModalFocus::Quit;
+                                let focused =
+                                    settings_modal.focused_setting() == SettingsModalFocus::Quit;
                                 let mut button = egui::Button::new("Quit App")
                                     .stroke(egui::Stroke::new(2.0, egui::Color32::TRANSPARENT));
                                 if focused {
@@ -316,14 +319,18 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                             if state.settings.favourites.is_empty() {
                                 ui.label("No favourite folders saved.");
                             } else {
-                                for (index, favourite) in state.settings.favourites.iter().enumerate()
+                                for (index, favourite) in
+                                    state.settings.favourites.iter().enumerate()
                                 {
                                     let focused = index == favourites.focused_index;
                                     let exists = std::path::Path::new(favourite).is_dir();
                                     let label = if exists {
                                         crate::fs::location_label(favourite).to_owned()
                                     } else {
-                                        format!("{} (missing)", crate::fs::location_label(favourite))
+                                        format!(
+                                            "{} (missing)",
+                                            crate::fs::location_label(favourite)
+                                        )
                                     };
                                     let mut button = egui::Button::new(label);
                                     if focused {
@@ -331,7 +338,8 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                                             .fill(tc.focused_fill)
                                             .stroke(egui::Stroke::new(2.0, tc.focused_stroke));
                                     }
-                                    if ui.add_sized([ui.available_width(), 34.0], button).clicked() {
+                                    if ui.add_sized([ui.available_width(), 34.0], button).clicked()
+                                    {
                                         actions.push(CommanderAction::FocusFavourite(index));
                                         actions.push(CommanderAction::OpenFocusedFavourite);
                                     }
@@ -361,7 +369,8 @@ fn modal_overlay(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Comman
                             ui.add_space(8.0);
                             for (index, choice) in decompress.choices().iter().enumerate() {
                                 let focused = index == decompress.focused_index;
-                                let mut button = egui::Button::new(choice.label(&decompress.archive_stem));
+                                let mut button =
+                                    egui::Button::new(choice.label(&decompress.archive_stem));
                                 if focused {
                                     button = button
                                         .fill(tc.focused_fill)
@@ -507,7 +516,12 @@ fn render_operation_progress(
     }
 }
 
-fn input_help_overlay(ctx: &egui::Context, state: &AppState, images: &ButtonImages, tc: &ThemeColors) {
+fn input_help_overlay(
+    ctx: &egui::Context,
+    state: &AppState,
+    images: &ButtonImages,
+    tc: &ThemeColors,
+) {
     if !state.show_input_help {
         return;
     }
@@ -562,20 +576,29 @@ fn mapping_grid_left(ui: &mut egui::Ui, images: &ButtonImages) {
             ui.strong("Gamepad");
             ui.end_row();
 
-            mapping_row_img(ui, "Move selection",          "Up / Down",      |ui| { btn(ui, images.dpad_up); btn(ui, images.dpad_down); });
-            mapping_row_img(ui, "Page up / down",          "Page Up / Down", |ui| { btn(ui, images.lb); btn(ui, images.rb); });
-            mapping_row(ui,     "Jump to start / end",     "Home / End",     "—");
-            mapping_row_img(ui, "Switch pane",             "Tab",            |ui| { btn(ui, images.dpad_left); btn(ui, images.dpad_right); });
-            mapping_row(ui,     "Parent folder",           "Backspace",      "—");
-            mapping_row_img(ui, "Open / confirm",          "Enter",          |ui| btn(ui, images.south));
-            mapping_row_img(ui, "Cancel / back",           "Esc",            |ui| btn(ui, images.east));
-            mapping_row_img(ui, "Toggle mark",             "Space",          |ui| btn(ui, images.west));
-            mapping_row_img(ui, "Rename",                  "F2",             |ui| btn(ui, images.north));
-            mapping_row_img(ui, "Copy to other pane",      "F5",             |ui| btn(ui, images.north));
-            mapping_row_img(ui, "Move to other pane",      "F6",             |ui| btn(ui, images.north));
-            mapping_row_img(ui, "Create folder",           "F7",             |ui| btn(ui, images.north));
-            mapping_row_img(ui, "Create file",             "Ctrl+N",         |ui| btn(ui, images.north));
-            mapping_row_img(ui, "Create text file",        "Ctrl+T",         |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Move selection", "Up / Down", |ui| {
+                btn(ui, images.dpad_up);
+                btn(ui, images.dpad_down);
+            });
+            mapping_row_img(ui, "Page up / down", "Page Up / Down", |ui| {
+                btn(ui, images.lb);
+                btn(ui, images.rb);
+            });
+            mapping_row(ui, "Jump to start / end", "Home / End", "—");
+            mapping_row_img(ui, "Switch pane", "Tab", |ui| {
+                btn(ui, images.dpad_left);
+                btn(ui, images.dpad_right);
+            });
+            mapping_row(ui, "Parent folder", "Backspace", "—");
+            mapping_row_img(ui, "Open / confirm", "Enter", |ui| btn(ui, images.south));
+            mapping_row_img(ui, "Cancel / back", "Esc", |ui| btn(ui, images.east));
+            mapping_row_img(ui, "Toggle mark", "Space", |ui| btn(ui, images.west));
+            mapping_row_img(ui, "Rename", "F2", |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Copy to other pane", "F5", |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Move to other pane", "F6", |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Create folder", "F7", |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Create file", "Ctrl+N", |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Create text file", "Ctrl+T", |ui| btn(ui, images.north));
         });
 }
 
@@ -590,23 +613,35 @@ fn mapping_grid_right(ui: &mut egui::Ui, images: &ButtonImages) {
             ui.strong("Gamepad");
             ui.end_row();
 
-            mapping_row_img(ui, "Delete",                  "F8 / Delete",    |ui| btn(ui, images.north));
-            mapping_row_img(ui, "Refresh",                 "Ctrl+R",         |ui| btn(ui, images.north));
-            mapping_row_img(ui, "Favourites",              "F3 / Ctrl+F",    |ui| btn(ui, images.l3));
-            mapping_row_img(ui, "Command menu",            "—",              |ui| btn(ui, images.north));
-            mapping_row_img(ui, "Settings",                "—",              |ui| btn(ui, images.start));
-            mapping_row_img(ui, "Input help",              "F1",             |ui| btn(ui, images.select));
-            mapping_row_img(ui, "OSK: navigate",           "Arrow keys",     |ui| btn(ui, images.dpad_all));
-            mapping_row_img(ui, "OSK: press key",          "Type normally",  |ui| btn(ui, images.south));
-            mapping_row_img(ui, "OSK: backspace",          "Backspace",      |ui| btn(ui, images.west));
-            mapping_row_img(ui, "OSK: symbols layer",      "—",              |ui| btn(ui, images.north));
-            mapping_row_img(ui, "OSK: cursor left / right","← →",            |ui| { btn(ui, images.lb); btn(ui, images.rb); });
-            mapping_row_img(ui, "OSK: submit",             "Enter",          |ui| btn(ui, images.start));
-            mapping_row_img(ui, "OSK: cancel",             "Esc",            |ui| btn(ui, images.east));
+            mapping_row_img(ui, "Delete", "F8 / Delete", |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Refresh", "Ctrl+R", |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Favourites", "F3 / Ctrl+F", |ui| btn(ui, images.l3));
+            mapping_row_img(ui, "Command menu", "—", |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Settings", "—", |ui| btn(ui, images.start));
+            mapping_row_img(ui, "Input help", "F1", |ui| btn(ui, images.select));
+            mapping_row_img(ui, "OSK: navigate", "Arrow keys", |ui| {
+                btn(ui, images.dpad_all)
+            });
+            mapping_row_img(ui, "OSK: press key", "Type normally", |ui| {
+                btn(ui, images.south)
+            });
+            mapping_row_img(ui, "OSK: backspace", "Backspace", |ui| btn(ui, images.west));
+            mapping_row_img(ui, "OSK: symbols layer", "—", |ui| btn(ui, images.north));
+            mapping_row_img(ui, "OSK: cursor left / right", "← →", |ui| {
+                btn(ui, images.lb);
+                btn(ui, images.rb);
+            });
+            mapping_row_img(ui, "OSK: submit", "Enter", |ui| btn(ui, images.start));
+            mapping_row_img(ui, "OSK: cancel", "Esc", |ui| btn(ui, images.east));
         });
 }
 
-fn settings_row(ui: &mut egui::Ui, focused: bool, tc: &ThemeColors, add_contents: impl FnOnce(&mut egui::Ui)) {
+fn settings_row(
+    ui: &mut egui::Ui,
+    focused: bool,
+    tc: &ThemeColors,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
     let frame = if focused {
         egui::Frame::new()
             .fill(tc.focused_fill)
@@ -630,7 +665,12 @@ fn mapping_row(ui: &mut egui::Ui, action: &str, keyboard: &str, gamepad: &str) {
     ui.end_row();
 }
 
-fn mapping_row_img(ui: &mut egui::Ui, action: &str, keyboard: &str, gamepad_ui: impl FnOnce(&mut egui::Ui)) {
+fn mapping_row_img(
+    ui: &mut egui::Ui,
+    action: &str,
+    keyboard: &str,
+    gamepad_ui: impl FnOnce(&mut egui::Ui),
+) {
     ui.label(action);
     ui.label(keyboard);
     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), gamepad_ui);

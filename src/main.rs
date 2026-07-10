@@ -8,8 +8,8 @@ mod input;
 mod platform;
 mod settings;
 mod state;
-mod theme;
 mod tasks;
+mod theme;
 mod ui;
 
 use app::{APP_TITLE, PadCommanderApp};

@@ -64,12 +64,16 @@ fn pane(
                 // separator width + item spacing on each side
                 let sep_w = 1.0 + ui.spacing().item_spacing.x * 2.0;
                 let marked_w = ui.ctx().fonts_mut(|f| {
-                    f.layout_no_wrap(marked_text.clone(), font_id.clone(), white).size().x
+                    f.layout_no_wrap(marked_text.clone(), font_id.clone(), white)
+                        .size()
+                        .x
                 });
                 let path_budget = (ui.available_width() - marked_w - sep_w).max(0.0);
                 let path = crate::fs::location_label(&pane.current_location);
                 let path_w = ui.ctx().fonts_mut(|f| {
-                    f.layout_no_wrap(path.to_string(), font_id.clone(), white).size().x
+                    f.layout_no_wrap(path.to_string(), font_id.clone(), white)
+                        .size()
+                        .x
                 });
                 let display_path = if path_w <= path_budget {
                     path.to_string()
@@ -78,9 +82,13 @@ fn pane(
                     let chars: Vec<char> = path.chars().collect();
                     let mut start = 1;
                     loop {
-                        let candidate: String = std::iter::once('…').chain(chars[start..].iter().copied()).collect();
+                        let candidate: String = std::iter::once('…')
+                            .chain(chars[start..].iter().copied())
+                            .collect();
                         let w = ui.ctx().fonts_mut(|f| {
-                            f.layout_no_wrap(candidate.clone(), font_id.clone(), white).size().x
+                            f.layout_no_wrap(candidate.clone(), font_id.clone(), white)
+                                .size()
+                                .x
                         });
                         if w <= path_budget || start >= chars.len() - 1 {
                             break candidate;
@@ -133,8 +141,10 @@ fn pane(
             } else {
                 area_rect.width()
             };
-            let viewport_rect =
-                egui::Rect::from_min_size(area_rect.min, egui::vec2(content_width, viewport_height));
+            let viewport_rect = egui::Rect::from_min_size(
+                area_rect.min,
+                egui::vec2(content_width, viewport_height),
+            );
             let scrollbar_rect = egui::Rect::from_min_size(
                 area_rect.min + egui::vec2(content_width + SCROLLBAR_GAP, 0.0),
                 egui::vec2(SCROLLBAR_WIDTH, viewport_height),
@@ -153,8 +163,7 @@ fn pane(
                 let thumb_frac = (viewport_height / total_content_height).min(1.0);
                 let thumb_height = (thumb_frac * viewport_height).clamp(20.0, viewport_height);
                 let track_range = (viewport_height - thumb_height).max(1.0);
-                let thumb_top =
-                    (scroll_offset / max_scroll * track_range).clamp(0.0, track_range);
+                let thumb_top = (scroll_offset / max_scroll * track_range).clamp(0.0, track_range);
                 let thumb_rect = egui::Rect::from_min_size(
                     scrollbar_rect.min + egui::vec2(0.0, thumb_top),
                     egui::vec2(SCROLLBAR_WIDTH, thumb_height),
@@ -172,28 +181,22 @@ fn pane(
 
                 // Clamp before computing final thumb position for painting.
                 scroll_offset = scroll_offset.clamp(0.0, max_scroll);
-                let thumb_top =
-                    (scroll_offset / max_scroll * track_range).clamp(0.0, track_range);
+                let thumb_top = (scroll_offset / max_scroll * track_range).clamp(0.0, track_range);
                 let thumb_rect = egui::Rect::from_min_size(
                     scrollbar_rect.min + egui::vec2(0.0, thumb_top),
                     egui::vec2(SCROLLBAR_WIDTH, thumb_height),
                 );
 
                 let painter = ui.painter();
-                painter.rect_filled(
-                    scrollbar_rect,
-                    3.0,
-                    tc.scrollbar_track,
-                );
-                let thumb_color = if thumb_response.is_pointer_button_down_on()
-                    || thumb_response.dragged()
-                {
-                    tc.scrollbar_thumb_active
-                } else if thumb_response.hovered() {
-                    tc.scrollbar_thumb_hover
-                } else {
-                    tc.scrollbar_thumb
-                };
+                painter.rect_filled(scrollbar_rect, 3.0, tc.scrollbar_track);
+                let thumb_color =
+                    if thumb_response.is_pointer_button_down_on() || thumb_response.dragged() {
+                        tc.scrollbar_thumb_active
+                    } else if thumb_response.hovered() {
+                        tc.scrollbar_thumb_hover
+                    } else {
+                        tc.scrollbar_thumb
+                    };
                 painter.rect_filled(thumb_rect, 3.0, thumb_color);
             }
 
@@ -202,15 +205,15 @@ fn pane(
 
             // Render visible rows into a child UI clipped to the viewport.
             {
-                let content_origin = egui::pos2(viewport_rect.left(), viewport_rect.top() - scroll_offset);
+                let content_origin =
+                    egui::pos2(viewport_rect.left(), viewport_rect.top() - scroll_offset);
                 let content_max_rect = egui::Rect::from_min_size(
                     content_origin,
                     egui::vec2(content_width, total_content_height),
                 );
                 let clip_rect = viewport_rect.intersect(ui.clip_rect());
-                let mut content_ui = ui.new_child(
-                    egui::UiBuilder::new().max_rect(content_max_rect),
-                );
+                let mut content_ui =
+                    ui.new_child(egui::UiBuilder::new().max_rect(content_max_rect));
                 content_ui.set_clip_rect(clip_rect);
                 let viewport_in_content = egui::Rect::from_min_size(
                     egui::pos2(0.0, scroll_offset),
@@ -234,13 +237,20 @@ fn pane(
             });
             let row_response = ui.interact(viewport_rect, click_id, egui::Sense::click());
             if row_response.clicked()
-                && let Some(index) =
-                    clicked_row_index(ui, &row_response, scroll_offset.round() as i32, pane.entries.len())
+                && let Some(index) = clicked_row_index(
+                    ui,
+                    &row_response,
+                    scroll_offset.round() as i32,
+                    pane.entries.len(),
+                )
             {
                 actions.push(CommanderAction::SelectEntry { pane: side, index });
             }
 
-            actions.push(CommanderAction::SetPaneScrollOffset { pane: side, offset: scroll_offset.round() as i32 });
+            actions.push(CommanderAction::SetPaneScrollOffset {
+                pane: side,
+                offset: scroll_offset.round() as i32,
+            });
 
             ui.separator();
             bottom_status_bar(ui, pane);
@@ -375,13 +385,41 @@ fn header_row(ui: &mut egui::Ui) {
         )
     };
 
-    paint_cell_text(painter, cell(x, layout.name_width), "Name", font_id.clone(), color, egui::Align2::LEFT_CENTER);
+    paint_cell_text(
+        painter,
+        cell(x, layout.name_width),
+        "Name",
+        font_id.clone(),
+        color,
+        egui::Align2::LEFT_CENTER,
+    );
     x += layout.name_width + layout.spacing;
-    paint_cell_text(painter, cell(x, TYPE_COLUMN_WIDTH), "Type", font_id.clone(), color, egui::Align2::CENTER_CENTER);
+    paint_cell_text(
+        painter,
+        cell(x, TYPE_COLUMN_WIDTH),
+        "Type",
+        font_id.clone(),
+        color,
+        egui::Align2::CENTER_CENTER,
+    );
     x += TYPE_COLUMN_WIDTH + layout.spacing;
-    paint_cell_text(painter, cell(x, SIZE_COLUMN_WIDTH), "Size", font_id.clone(), color, egui::Align2::RIGHT_CENTER);
+    paint_cell_text(
+        painter,
+        cell(x, SIZE_COLUMN_WIDTH),
+        "Size",
+        font_id.clone(),
+        color,
+        egui::Align2::RIGHT_CENTER,
+    );
     x += SIZE_COLUMN_WIDTH + layout.spacing;
-    paint_cell_text(painter, cell(x, MODIFIED_COLUMN_WIDTH), "Modified", font_id, color, egui::Align2::LEFT_CENTER);
+    paint_cell_text(
+        painter,
+        cell(x, MODIFIED_COLUMN_WIDTH),
+        "Modified",
+        font_id,
+        color,
+        egui::Align2::LEFT_CENTER,
+    );
 
     ui.advance_cursor_after_rect(row_rect);
 }
@@ -584,9 +622,11 @@ fn paint_cell_text_elided(
         };
         f.layout_job(job)
     });
-    painter
-        .with_clip_rect(rect)
-        .galley(rect.left_center() - egui::vec2(0.0, galley.size().y / 2.0), galley, color);
+    painter.with_clip_rect(rect).galley(
+        rect.left_center() - egui::vec2(0.0, galley.size().y / 2.0),
+        galley,
+        color,
+    );
 }
 
 fn paint_cell_text(

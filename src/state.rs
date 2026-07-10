@@ -347,7 +347,8 @@ impl AppState {
 
     pub fn poll_tasks(&mut self) {
         for completion in self.task_manager.poll_completed() {
-            let modal_is_showing = matches!(self.dialog, DialogState::OperationProgress(id) if id == completion.id);
+            let modal_is_showing =
+                matches!(self.dialog, DialogState::OperationProgress(id) if id == completion.id);
 
             if let Some(context) = self.delete_tasks.remove(&completion.id) {
                 self.refresh_pane(context.pane);
@@ -475,34 +476,27 @@ impl AppState {
                     .extension()
                     .and_then(|e| e.to_str())
                     .map(|e| e.to_ascii_lowercase());
-                let is_executable =
-                    matches!(ext.as_deref(), Some("exe" | "bat" | "cmd" | "com"));
+                let is_executable = matches!(ext.as_deref(), Some("exe" | "bat" | "cmd" | "com"));
 
                 if is_executable {
                     let parent = path.parent().unwrap_or(path);
                     match std::process::Command::new(path).current_dir(parent).spawn() {
                         Ok(_) => {
-                            self.status =
-                                format!("Launched {}.", selected_entry.display_name);
+                            self.status = format!("Launched {}.", selected_entry.display_name);
                         }
                         Err(e) => {
-                            self.status = format!(
-                                "Failed to launch {}: {}",
-                                selected_entry.display_name, e
-                            );
+                            self.status =
+                                format!("Failed to launch {}: {}", selected_entry.display_name, e);
                         }
                     }
                 } else {
                     match windows::open_with_default_app(path) {
                         Ok(()) => {
-                            self.status =
-                                format!("Opened {}.", selected_entry.display_name);
+                            self.status = format!("Opened {}.", selected_entry.display_name);
                         }
                         Err(e) => {
-                            self.status = format!(
-                                "Failed to open {}: {}",
-                                selected_entry.display_name, e
-                            );
+                            self.status =
+                                format!("Failed to open {}: {}", selected_entry.display_name, e);
                         }
                     }
                 }
@@ -838,7 +832,10 @@ impl AppState {
 
         let request = pending.into_shortcut_request(shortcut_name_with_default_extension(&value));
         if request.shortcut_path.exists() {
-            self.dialog = DialogState::ShortcutConflict(ShortcutConflictState { request, focused_index: 0 });
+            self.dialog = DialogState::ShortcutConflict(ShortcutConflictState {
+                request,
+                focused_index: 0,
+            });
             self.status = "Shortcut already exists.".to_owned();
         } else {
             self.start_create_shortcut(request, false);
@@ -868,7 +865,10 @@ impl AppState {
 
     fn start_create_shortcut(&mut self, request: ShortcutRequest, overwrite: bool) {
         if request.shortcut_path.exists() && !overwrite {
-            self.dialog = DialogState::ShortcutConflict(ShortcutConflictState { request, focused_index: 0 });
+            self.dialog = DialogState::ShortcutConflict(ShortcutConflictState {
+                request,
+                focused_index: 0,
+            });
             self.status = "Shortcut already exists.".to_owned();
             return;
         }
@@ -952,7 +952,15 @@ impl AppState {
             return;
         }
 
-        self.execute_transfer_task(kind, source_side, target_side, source_paths, target_directory, label, false);
+        self.execute_transfer_task(
+            kind,
+            source_side,
+            target_side,
+            source_paths,
+            target_directory,
+            label,
+            false,
+        );
     }
 
     fn execute_transfer_task(
@@ -1091,7 +1099,11 @@ impl AppState {
         pane.marked_items.clear();
     }
 
-    fn start_archive_decompression(&mut self, request: DecompressRequest, password: Option<String>) {
+    fn start_archive_decompression(
+        &mut self,
+        request: DecompressRequest,
+        password: Option<String>,
+    ) {
         let target_location = self.pane(request.target_side).current_location.clone();
         if target_location == fs::ROOTS_LOCATION {
             self.status = format!(
@@ -1316,7 +1328,9 @@ impl AppState {
                 SettingsModalFocus::UiScale => self.adjust_ui_scale(delta),
                 SettingsModalFocus::UseRecycleBin => self.toggle_use_recycle_bin(),
                 SettingsModalFocus::ShowHiddenFiles => self.toggle_show_hidden_files(),
-                SettingsModalFocus::ControllerOverride => self.cycle_controller_override(delta > 0.0),
+                SettingsModalFocus::ControllerOverride => {
+                    self.cycle_controller_override(delta > 0.0)
+                }
                 SettingsModalFocus::Theme => self.cycle_theme(delta > 0.0),
                 SettingsModalFocus::Quit => {
                     self.status = "Press A / Enter to quit.".to_owned();
@@ -1374,7 +1388,11 @@ impl AppState {
 
     fn cycle_controller_override(&mut self, forward: bool) {
         let current = self.settings.controller_override;
-        self.settings.controller_override = if forward { current.next() } else { current.prev() };
+        self.settings.controller_override = if forward {
+            current.next()
+        } else {
+            current.prev()
+        };
         self.persist_settings(&format!(
             "Controller buttons: {}.",
             self.settings.controller_override.label()
@@ -1383,7 +1401,11 @@ impl AppState {
 
     fn cycle_theme(&mut self, forward: bool) {
         let current = self.settings.theme;
-        self.settings.theme = if forward { current.next() } else { current.prev() };
+        self.settings.theme = if forward {
+            current.next()
+        } else {
+            current.prev()
+        };
         self.persist_settings(&format!("Theme: {}.", self.settings.theme.label()));
     }
 
@@ -1636,10 +1658,18 @@ impl PaneState {
         let last_index = self.entries.len() - 1;
         let next_index = match movement {
             SelectionMovement::Up => {
-                if self.selected_index == 0 { last_index } else { self.selected_index - 1 }
+                if self.selected_index == 0 {
+                    last_index
+                } else {
+                    self.selected_index - 1
+                }
             }
             SelectionMovement::Down => {
-                if self.selected_index >= last_index { 0 } else { self.selected_index + 1 }
+                if self.selected_index >= last_index {
+                    0
+                } else {
+                    self.selected_index + 1
+                }
             }
             SelectionMovement::PageUp => self.selected_index.saturating_sub(PAGE_SIZE),
             SelectionMovement::PageDown => (self.selected_index + PAGE_SIZE).min(last_index),
@@ -2022,8 +2052,16 @@ pub struct PaneSummary {
 impl PaneSummary {
     pub fn format(&self) -> String {
         let size_label = FileEntry::size_value_label(self.total_size);
-        let file_label = if self.file_count == 1 { "file" } else { "files" };
-        let folder_label = if self.folder_count == 1 { "folder" } else { "folders" };
+        let file_label = if self.file_count == 1 {
+            "file"
+        } else {
+            "files"
+        };
+        let folder_label = if self.folder_count == 1 {
+            "folder"
+        } else {
+            "folders"
+        };
         format!(
             "{} {}, {} {} | {size_label}",
             self.file_count, file_label, self.folder_count, folder_label
@@ -2343,10 +2381,18 @@ impl CommandMenuState {
         let last_index = self.entries.len() - 1;
         self.focused_index = match movement {
             SelectionMovement::Up | SelectionMovement::PageUp => {
-                if self.focused_index == 0 { last_index } else { self.focused_index - 1 }
+                if self.focused_index == 0 {
+                    last_index
+                } else {
+                    self.focused_index - 1
+                }
             }
             SelectionMovement::Down | SelectionMovement::PageDown => {
-                if self.focused_index >= last_index { 0 } else { self.focused_index + 1 }
+                if self.focused_index >= last_index {
+                    0
+                } else {
+                    self.focused_index + 1
+                }
             }
             SelectionMovement::Home => 0,
             SelectionMovement::End => last_index,
@@ -2656,9 +2702,7 @@ impl TextInputDialogState {
                 let old_row = self.focused_row;
                 let new_row = match direction {
                     FocusDirection::Up => self.focused_row.saturating_sub(1),
-                    FocusDirection::Down => {
-                        (self.focused_row + 1).min(self.keys().len() - 1)
-                    }
+                    FocusDirection::Down => (self.focused_row + 1).min(self.keys().len() - 1),
                     _ => unreachable!(),
                 };
                 if new_row != old_row {

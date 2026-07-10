@@ -4,10 +4,15 @@ use crate::{
     action::{CommanderAction, TextInputAction},
     state::{AppState, DialogState, KeyboardLayer, OnScreenKey, TextInputDialogState},
     theme::ThemeColors,
-    ui::button_images::{btn, ButtonImages},
+    ui::button_images::{ButtonImages, btn},
 };
 
-pub fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<CommanderAction>, images: &ButtonImages) {
+pub fn show(
+    ctx: &egui::Context,
+    state: &AppState,
+    actions: &mut Vec<CommanderAction>,
+    images: &ButtonImages,
+) {
     let DialogState::TextInput(dialog) = &state.dialog else {
         return;
     };
