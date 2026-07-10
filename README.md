@@ -108,3 +108,9 @@ Settings are saved automatically and persist between sessions. You can configure
 ## License
 
 [MIT](LICENSE)
+
+---
+
+<p align="center">
+  <a href="https://ko-fi.com/claudiopereira">☕ Support this project on Ko-fi</a>
+</p>
