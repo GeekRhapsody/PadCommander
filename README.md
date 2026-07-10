@@ -12,7 +12,6 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-Windows-blue" alt="Platform: Windows"/>
   <img src="https://img.shields.io/badge/built%20with-Rust-orange" alt="Built with Rust"/>
-  <img src="https://img.shields.io/badge/version-1.0.0-green" alt="Version"/>
 </p>
 
 ---
