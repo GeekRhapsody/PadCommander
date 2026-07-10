@@ -19,8 +19,6 @@
 
 PadCommander is a full-screen, gamepad-first two-pane file manager for Windows, inspired by Total Commander and Double Commander. Navigate your files with an Xbox, PlayStation, or Nintendo Switch controller — or stick to the keyboard if you prefer.
 
-<!-- Screenshots placeholder -->
-<!--
 <p align="center">
   <img src="assets/screenshots/main-view.png" alt="Main dual-pane view" width="700"/>
   <br/>
@@ -31,7 +29,6 @@ PadCommander is a full-screen, gamepad-first two-pane file manager for Windows, 
   <br/>
   <em>Built-in on-screen keyboard for controller-driven text entry</em>
 </p>
--->
 
 ## Features
 
