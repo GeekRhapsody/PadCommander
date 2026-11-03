@@ -6,17 +6,17 @@
 </p> -->
 
 <p align="center">
-  <strong>A gamepad-first dual-pane file manager for Windows</strong>
+  <strong>A gamepad-first dual-pane file manager for Windows and Linux</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/platform-Windows-blue" alt="Platform: Windows"/>
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blue" alt="Platform: Windows | Linux"/>
   <img src="https://img.shields.io/badge/built%20with-Rust-orange" alt="Built with Rust"/>
 </p>
 
 ---
 
-PadCommander is a full-screen, gamepad-first two-pane file manager for Windows, inspired by Total Commander and Double Commander. Navigate your files with an Xbox, PlayStation, or Nintendo Switch controller — or stick to the keyboard if you prefer.
+PadCommander is a full-screen, gamepad-first two-pane file manager for Windows and Linux (including Steam Deck), inspired by Total Commander and Double Commander. Navigate your files with an Xbox, PlayStation, or Nintendo Switch controller — or stick to the keyboard if you prefer.
 
 <p align="center">
   <img src="assets/screenshots/main-view.png" alt="Main dual-pane view" width="700"/>
@@ -46,9 +46,10 @@ PadCommander is a full-screen, gamepad-first two-pane file manager for Windows, 
 
 ## Requirements
 
-- Windows 10 or later
+- Windows 10 or later, or Linux (x86_64, X11 or Wayland; Steam Deck supported)
 - Rust 1.85+
-- MSVC C++ Build Tools
+- Windows: MSVC C++ Build Tools
+- Linux: see [docs/BUILD_LINUX.md](docs/BUILD_LINUX.md) for the system packages
 
 ## Building from Source
 
@@ -63,7 +64,7 @@ cargo run
 cargo build --release
 ```
 
-The release binary is output to `target\release\pad-commander.exe`.
+The release binary is output to `target\release\pad-commander.exe` on Windows and `target/release/pad-commander` on Linux.
 
 ## Usage
 
@@ -107,7 +108,7 @@ Settings are saved automatically and persist between sessions. You can configure
 | GUI | [egui](https://github.com/emilk/egui) / [eframe](https://github.com/emilk/egui/tree/master/crates/eframe) |
 | Gamepad input | [gilrs](https://gitlab.com/gilrs-project/gilrs) |
 | Archive support | zip, unarc-rs |
-| Windows APIs | windows, windows-sys |
+| Platform APIs | windows, windows-sys (Windows); libc, trash (Linux) |
 | Serialization | serde / serde_json |
 
 ## License

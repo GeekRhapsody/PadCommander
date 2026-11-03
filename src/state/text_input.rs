@@ -430,8 +430,14 @@ fn validate_text_input(purpose: TextInputPurpose, value: &str) -> Option<String>
         return Some("Name cannot be empty.".to_owned());
     }
 
-    if purpose.uses_windows_filename_validation() {
+    if !purpose.uses_windows_filename_validation() {
+        return None;
+    }
+
+    if cfg!(windows) {
         validate_windows_filename(trimmed)
+    } else if trimmed.contains('/') {
+        Some("Filenames cannot contain '/'.".to_owned())
     } else {
         None
     }
@@ -507,6 +513,7 @@ mod tests {
         assert_eq!(dialog.value, "ab");
     }
 
+    #[cfg(windows)]
     #[test]
     fn text_dialog_blocks_windows_invalid_filename_characters() {
         let mut dialog = TextInputDialogState::new(TextInputPurpose::CreateFolder, String::new());
@@ -516,6 +523,17 @@ mod tests {
 
         assert!(matches!(outcome, TextInputOutcome::Blocked(_)));
         assert!(dialog.validation_error.is_some());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn text_dialog_blocks_slash_in_linux_filenames() {
+        let mut dialog = TextInputDialogState::new(TextInputPurpose::CreateFolder, String::new());
+        dialog.apply_action(TextInputAction::Insert("bad/name".to_owned()));
+
+        let outcome = dialog.apply_action(TextInputAction::Submit);
+
+        assert!(matches!(outcome, TextInputOutcome::Blocked(_)));
     }
 
     #[test]

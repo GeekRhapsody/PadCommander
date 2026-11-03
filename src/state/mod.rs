@@ -1,7 +1,7 @@
 use crate::{
     action::{CommanderAction, TextInputAction, TextInputPurpose},
     fs::{self, LocalFileSystem, VirtualFileSystem},
-    platform::windows,
+    platform,
     settings::{self, Settings, UI_SCALE_STEP},
     tasks::{DeleteMode, TaskId, TaskKind, TaskManager, TaskStatus},
 };
@@ -497,7 +497,7 @@ impl AppState {
                         }
                     }
                 } else {
-                    match windows::open_with_default_app(path) {
+                    match platform::open_with_default_app(path) {
                         Ok(()) => {
                             self.status = format!("Opened {}.", selected_entry.display_name);
                         }
@@ -880,7 +880,7 @@ impl AppState {
             return;
         }
 
-        let result = windows::create_shortcut(
+        let result = platform::create_shortcut(
             &request.target_path,
             &request.shortcut_path,
             request.working_directory.as_deref(),
@@ -1585,10 +1585,12 @@ impl AppState {
     }
 
     pub fn can_create_shortcut_in_other_pane(&self) -> bool {
-        self.active_pane()
-            .selected_markable_entry()
-            .map(FileEntry::is_exe_file)
-            .unwrap_or(false)
+        platform::SUPPORTS_SHORTCUTS
+            && self
+                .active_pane()
+                .selected_markable_entry()
+                .map(FileEntry::is_exe_file)
+                .unwrap_or(false)
     }
 
     fn text_dialog_mut(&mut self) -> Option<&mut TextInputDialogState> {
@@ -2015,6 +2017,7 @@ mod tests {
         assert_eq!(state.left_pane.marked_summary().total_size, 2048);
     }
 
+    #[cfg(windows)]
     #[test]
     fn create_shortcut_action_is_available_only_for_exe_files() {
         let mut state = test_state();
@@ -2044,6 +2047,7 @@ mod tests {
         assert!(!state.can_create_shortcut_in_other_pane());
     }
 
+    #[cfg(windows)]
     #[test]
     fn create_shortcut_prompts_with_parent_folder_name() {
         let mut state = test_state();

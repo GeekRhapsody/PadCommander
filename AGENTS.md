@@ -2,12 +2,12 @@
 
 ## Project Goal
 
-PadCommander is a Windows-only Rust full-screen graphical two-pane file manager inspired by Total Commander and Double Commander. It must be gamepad-first while remaining fully usable by keyboard.
+PadCommander is a Rust full-screen graphical two-pane file manager inspired by Total Commander and Double Commander, for Windows and Linux (including Steam Deck). It must be gamepad-first while remaining fully usable by keyboard.
 
 ## Non-Negotiable Product Requirements
 
 - Build a two-pane commander-style file manager.
-- Target Windows only.
+- Target Windows and Linux (including Steam Deck).
 - Use Rust.
 - Build a full-screen graphical application, not a terminal TUI.
 - Every feature must be reachable and usable with a gamepad.
@@ -25,7 +25,7 @@ PadCommander is a Windows-only Rust full-screen graphical two-pane file manager 
 - Keep file operations out of UI code.
 - Use a background task manager for long-running operations.
 - Create a `VirtualFileSystem` abstraction so local filesystem and FTP can share pane and navigation concepts.
-- Keep Windows-specific behavior behind small platform modules.
+- Keep OS-specific behavior behind small platform modules.
 - Prefer safe Rust and explicit error handling.
 - Avoid panics in app logic.
 - Use tests for pure logic and service modules where practical.
@@ -36,7 +36,7 @@ PadCommander is a Windows-only Rust full-screen graphical two-pane file manager 
 - Input handling should translate gamepad, keyboard, and pointer/UI events into shared actions.
 - File operations should live in service modules and report progress through background task state.
 - VFS implementations should share navigation, listing, metadata, and operation concepts through traits or explicit interfaces.
-- Platform-specific Windows behavior should be isolated in narrow modules with clear APIs.
+- Platform-specific Windows and Linux behavior should be isolated in narrow modules (`src/platform/windows.rs`, `src/platform/linux.rs`) that expose the same API.
 
 ## Gamepad-First UX Rules
 
@@ -74,7 +74,7 @@ Before finishing any implementation task:
 
 ## Scope Discipline
 
-- Preserve the Windows-only product direction unless the user explicitly changes it.
-- Avoid adding cross-platform abstractions beyond what is useful for keeping Windows-specific behavior isolated.
+- Support only Windows and Linux unless the user explicitly changes it.
+- Avoid adding cross-platform abstractions beyond what is useful for keeping OS-specific behavior isolated.
 - Keep each change focused on the requested milestone.
 - Favor small, testable service and state modules over broad rewrites.

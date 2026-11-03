@@ -1,39 +1,28 @@
-use eframe::egui;
+use std::env;
 use std::path::PathBuf;
-use std::sync::Arc;
 use windows_sys::Win32::Storage::FileSystem::{GetLogicalDrives, GetVolumeInformationW};
 use windows_sys::Win32::UI::Shell::{
     FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, SHFILEOPSTRUCTW, SHFileOperationW,
 };
 
-pub fn native_options(title: &str) -> eframe::NativeOptions {
-    eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title(title)
-            .with_icon(app_icon())
-            .with_fullscreen(true)
-            .with_decorations(false),
-        ..Default::default()
-    }
-}
+pub const ROOTS_LABEL: &str = "This PC";
+pub const SUPPORTS_SHORTCUTS: bool = true;
 
-fn app_icon() -> Arc<egui::IconData> {
-    Arc::new(decode_app_icon().unwrap_or_default())
-}
-
-fn decode_app_icon() -> Result<egui::IconData, image::ImageError> {
-    let image = image::load_from_memory_with_format(
-        include_bytes!("../../assets/windows/app.ico"),
-        image::ImageFormat::Ico,
-    )?
-    .into_rgba8();
-    let (width, height) = image.dimensions();
-
-    Ok(egui::IconData {
-        rgba: image.into_raw(),
-        width,
-        height,
+pub fn home_dir() -> Option<PathBuf> {
+    env::var_os("USERPROFILE").map(PathBuf::from).or_else(|| {
+        let drive = env::var_os("HOMEDRIVE")?;
+        let path = env::var_os("HOMEPATH")?;
+        let mut home = PathBuf::from(drive);
+        home.push(path);
+        Some(home)
     })
+}
+
+pub fn config_dir() -> PathBuf {
+    env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(env::temp_dir)
+        .join("PadCommander")
 }
 
 pub fn logical_drive_roots() -> Vec<PathBuf> {
@@ -87,7 +76,6 @@ pub fn get_volume_label(root: &std::path::Path) -> Option<String> {
     String::from_utf16(&name_buf[..len]).ok()
 }
 
-#[cfg(windows)]
 pub fn delete_to_recycle_bin(paths: &[PathBuf]) -> Result<(), String> {
     let mut from = Vec::new();
     for path in paths {
@@ -121,12 +109,6 @@ pub fn delete_to_recycle_bin(paths: &[PathBuf]) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(windows))]
-pub fn delete_to_recycle_bin(_paths: &[PathBuf]) -> Result<(), String> {
-    Err("Recycle Bin delete is only supported on Windows.".to_owned())
-}
-
-#[cfg(windows)]
 pub fn open_with_default_app(path: &std::path::Path) -> Result<(), String> {
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
 
@@ -154,12 +136,6 @@ pub fn open_with_default_app(path: &std::path::Path) -> Result<(), String> {
     }
 }
 
-#[cfg(not(windows))]
-pub fn open_with_default_app(_path: &std::path::Path) -> Result<(), String> {
-    Err("Opening files is only supported on Windows.".to_owned())
-}
-
-#[cfg(windows)]
 pub fn create_shortcut(
     target_path: &std::path::Path,
     shortcut_path: &std::path::Path,
@@ -234,24 +210,12 @@ pub fn create_shortcut(
         .map_err(|error| format!("Cannot save shortcut {}: {error}", shortcut_path.display()))
 }
 
-#[cfg(windows)]
 fn wide_null(path: &std::path::Path) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
 
     path.as_os_str().encode_wide().chain([0]).collect()
 }
 
-#[cfg(not(windows))]
-pub fn create_shortcut(
-    _target_path: &std::path::Path,
-    _shortcut_path: &std::path::Path,
-    _working_directory: Option<&std::path::Path>,
-    _icon_path: Option<&std::path::Path>,
-) -> Result<(), String> {
-    Err("Windows shortcuts are only supported on Windows.".to_owned())
-}
-
-#[cfg(windows)]
 pub fn get_disk_free_space(path: &std::path::Path) -> Option<u64> {
     use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 
@@ -270,22 +234,4 @@ pub fn get_disk_free_space(path: &std::path::Path) -> Option<u64> {
     };
 
     if result != 0 { Some(free_bytes) } else { None }
-}
-
-#[cfg(not(windows))]
-pub fn get_disk_free_space(_path: &std::path::Path) -> Option<u64> {
-    None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bundled_app_icon_decodes_for_window_icon() {
-        let icon = decode_app_icon().expect("decode app icon");
-
-        assert!(!icon.rgba.is_empty());
-        assert_eq!(icon.rgba.len(), (icon.width * icon.height * 4) as usize);
-    }
 }

@@ -1,6 +1,6 @@
 # Build PadCommander on Windows
 
-PadCommander is a Windows-only Rust desktop app. These instructions cover local debug builds, local runs, release builds, and the manual smoke test expected before sharing a binary.
+PadCommander is a Rust desktop app for Windows and Linux. These instructions cover Windows: they cover local debug builds, local runs, release builds, and the manual smoke test expected before sharing a binary.
 
 ## Required Tools
 

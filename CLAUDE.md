@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-PadCommander is a Windows-only, full-screen, gamepad-first two-pane file manager (Total Commander style) written in Rust with `eframe`/`egui`. Every feature must work with a gamepad alone; the keyboard stays fully supported. Product rules, architecture preferences and quality gates live in [AGENTS.md](AGENTS.md) — read and follow it too.
+PadCommander is a full-screen, gamepad-first two-pane file manager (Total Commander style) written in Rust with `eframe`/`egui`, for Windows and Linux (including Steam Deck). Every feature must work with a gamepad alone; the keyboard stays fully supported. Product rules, architecture preferences and quality gates live in [AGENTS.md](AGENTS.md) — read and follow it too.
 
 ## Commands
 
@@ -12,7 +12,7 @@ cargo fmt
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-CI ([.github/workflows/windows.yml](.github/workflows/windows.yml)) runs only on `v*` tags: `cargo fmt --check`, then a release build that is zipped and published. Formatting failures break releases.
+[.github/workflows/ci.yml](.github/workflows/ci.yml) runs `cargo fmt --check` and `cargo test` on Windows and Ubuntu for pushes to `main` and PRs. [.github/workflows/release.yml](.github/workflows/release.yml) runs on `v*` tags and publishes a Windows zip, a Linux tarball and an AppImage. Linux builds need `libudev-dev` and the X11/Wayland dev packages (see [docs/BUILD_LINUX.md](docs/BUILD_LINUX.md)); this Windows machine cannot cross-check Linux, so CI is the Linux compile check.
 
 ## How the app is wired
 
@@ -24,8 +24,8 @@ CI ([.github/workflows/windows.yml](.github/workflows/windows.yml)) runs only on
 - [src/fs/mod.rs](src/fs/mod.rs): `VirtualFileSystem` trait + `LocalFileSystem`, directory listing, drive roots (`ROOTS_LOCATION` is `""`), create/rename/delete, `VfsError` with `user_message()`.
 - [src/tasks/mod.rs](src/tasks/mod.rs): `TaskManager` runs long work on threads (`spawn_threaded`), reports progress via `TaskReporter`, supports cancellation, and returns `TaskCompletion`s that `AppState::poll_tasks` consumes.
 - [src/archive.rs](src/archive.rs): zip via the `zip` crate, extraction via `unarc-rs`, and 7z/rar creation through external `7z`/`rar` executables found on disk.
-- [src/platform/windows.rs](src/platform/windows.rs): Win32 calls (drives, volume labels, recycle bin, shell open, `.lnk` shortcuts, free space). Keep Windows API usage here.
-- [src/settings.rs](src/settings.rs): JSON settings at `%APPDATA%\PadCommander\settings.json` (UI scale, theme, controller override, recycle bin, hidden files).
+- [src/platform/](src/platform/): `mod.rs` has the shared window options and re-exports the OS module. `windows.rs` (Win32: drives, volume labels, Recycle Bin, shell open, `.lnk` shortcuts, free space, `%APPDATA%`) and `linux.rs` (`/`, home and `/run/media` mounts, freedesktop Trash, `xdg-open`, `statvfs`, `~/.config`) expose the same functions and constants. Keep OS API usage here; callers use `crate::platform::x`.
+- [src/settings.rs](src/settings.rs): JSON settings at `%APPDATA%\PadCommander\settings.json` (Windows) or `~/.config/PadCommander/settings.json` (Linux) (UI scale, theme, controller override, recycle bin, hidden files).
 - [src/theme.rs](src/theme.rs): colors and fonts for Dark/Light.
 
 FTP, upload and download actions exist in the enum but are stubs that set a status message.

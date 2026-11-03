@@ -1,6 +1,6 @@
 # PadCommander Architecture
 
-PadCommander is a Windows-only Rust full-screen graphical two-pane file manager built with `eframe`/`egui`.
+PadCommander is a Rust full-screen graphical two-pane file manager for Windows and Linux (including Steam Deck), built with `eframe`/`egui`.
 
 ## Module Layout
 
@@ -13,8 +13,8 @@ PadCommander is a Windows-only Rust full-screen graphical two-pane file manager 
 - `fs/`: `VirtualFileSystem` trait, the `LocalFileSystem` implementation, drive roots, create/rename/delete, and `VfsError`.
 - `tasks/`: background task manager, task progress, cancellation, and completion reporting.
 - `archive.rs`: compress and decompress for `.zip`, `.7z`, and `.rar`, using the `zip` and `unarc-rs` crates and external `7z`/`rar` executables where needed.
-- `platform/windows.rs`: Windows-specific helpers (native window options, drives and volume labels, recycle bin, shell open, `.lnk` shortcuts, free disk space).
-- `settings.rs`: persisted JSON settings in `%APPDATA%\PadCommander\settings.json`, including UI scaling.
+- `platform/`: native window options (`mod.rs`) plus one module per OS with the same API. `windows.rs`: drives and volume labels, Recycle Bin, shell open, `.lnk` shortcuts, free disk space, config folder. `linux.rs`: `/`, home and removable-media mounts, freedesktop Trash, `xdg-open`, free disk space, XDG config folder; shortcuts are unsupported.
+- `settings.rs`: persisted JSON settings in the platform config folder (`%APPDATA%\PadCommander` or `~/.config/PadCommander`), including UI scaling.
 - `theme.rs`: Dark and Light colors and fonts.
 
 ## Core Flow

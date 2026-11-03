@@ -1,11 +1,12 @@
 use crate::{
-    platform::windows,
+    platform,
     state::{FileEntry, FileEntryFlags, FileEntryKind},
 };
 
 use chrono::{DateTime, Local};
 use std::{
-    env, fs,
+    ffi::OsStr,
+    fs,
     fs::OpenOptions,
     io,
     path::{Path, PathBuf},
@@ -88,7 +89,7 @@ impl LocalFileSystem {
 
 pub fn location_label(location: &str) -> &str {
     if location == ROOTS_LOCATION {
-        "This PC"
+        platform::ROOTS_LABEL
     } else {
         location
     }
@@ -117,7 +118,7 @@ pub fn get_free_space(location: &str) -> Option<u64> {
     if location == ROOTS_LOCATION {
         return None;
     }
-    windows::get_disk_free_space(Path::new(location))
+    platform::get_disk_free_space(Path::new(location))
 }
 
 pub fn default_open_location(initial_location: &str) -> String {
@@ -125,43 +126,24 @@ pub fn default_open_location(initial_location: &str) -> String {
 }
 
 fn user_documents_location() -> Option<String> {
-    env::var_os("USERPROFILE")
-        .map(PathBuf::from)
-        .or_else(|| {
-            let drive = env::var_os("HOMEDRIVE")?;
-            let path = env::var_os("HOMEPATH")?;
-            let mut home = PathBuf::from(drive);
-            home.push(path);
-            Some(home)
-        })
-        .map(|mut home| {
-            home.push("Documents");
-            home
-        })
+    platform::home_dir()
+        .map(|home| home.join("Documents"))
         .filter(|path| path.is_dir())
         .map(|path| path_to_location(&path))
 }
 
 fn user_profile_location() -> Option<String> {
-    env::var_os("USERPROFILE")
-        .map(PathBuf::from)
-        .or_else(|| {
-            let drive = env::var_os("HOMEDRIVE")?;
-            let path = env::var_os("HOMEPATH")?;
-            let mut home = PathBuf::from(drive);
-            home.push(path);
-            Some(home)
-        })
+    platform::home_dir()
         .filter(|path| path.is_dir())
         .map(|path| path_to_location(&path))
 }
 
 fn list_drive_roots() -> Vec<FileEntry> {
-    windows::logical_drive_roots()
+    platform::logical_drive_roots()
         .into_iter()
         .map(|root| {
             let letter = root.to_string_lossy().to_string();
-            let display_name = match windows::get_volume_label(&root) {
+            let display_name = match platform::get_volume_label(&root) {
                 Some(label) => format!("{letter} ({label})"),
                 None => letter,
             };
@@ -222,7 +204,7 @@ fn list_directory(path: &Path) -> Result<Vec<FileEntry>, VfsError> {
             .and_then(|metadata| metadata.modified().ok());
         let flags = metadata
             .as_ref()
-            .map(flags_from_metadata)
+            .map(|metadata| flags_from_metadata(&entry.file_name(), metadata))
             .unwrap_or_default();
 
         entries.push(FileEntry {
@@ -263,7 +245,8 @@ fn is_archive_path(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn flags_from_metadata(metadata: &fs::Metadata) -> FileEntryFlags {
+#[cfg_attr(windows, allow(unused_variables))]
+fn flags_from_metadata(name: &OsStr, metadata: &fs::Metadata) -> FileEntryFlags {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
@@ -281,7 +264,7 @@ fn flags_from_metadata(metadata: &fs::Metadata) -> FileEntryFlags {
     #[cfg(not(windows))]
     {
         FileEntryFlags {
-            hidden: false,
+            hidden: name.as_encoded_bytes().starts_with(b"."),
             read_only: metadata.permissions().readonly(),
         }
     }
@@ -394,7 +377,7 @@ pub fn delete_paths_to_recycle_bin(paths: &[PathBuf]) -> Result<(), VfsError> {
         });
     }
 
-    windows::delete_to_recycle_bin(paths).map_err(|message| VfsError::Delete { message })
+    platform::delete_to_recycle_bin(paths).map_err(|message| VfsError::Delete { message })
 }
 
 pub fn delete_paths_permanently(paths: &[PathBuf]) -> Result<(), VfsError> {
@@ -479,6 +462,7 @@ mod tests {
         assert!(location_exists(ROOTS_LOCATION));
     }
 
+    #[cfg(windows)]
     #[test]
     fn default_open_location_uses_documents_folder_when_available() {
         let temp_home = std::env::temp_dir().join("pad_commander_test_home");
@@ -497,5 +481,35 @@ mod tests {
         }
 
         assert_eq!(default_location, documents.to_string_lossy());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn default_open_location_uses_home_documents_folder_on_linux() {
+        let temp_home = std::env::temp_dir().join("pad_commander_test_linux_home");
+        let documents = temp_home.join("Documents");
+        std::fs::create_dir_all(&documents).expect("create documents folder");
+
+        let original_home = std::env::var_os("HOME");
+        unsafe { std::env::set_var("HOME", &temp_home) };
+
+        let default_location = default_open_location("/");
+
+        if let Some(original) = original_home {
+            unsafe { std::env::set_var("HOME", original) };
+        } else {
+            unsafe { std::env::remove_var("HOME") };
+        }
+
+        assert_eq!(default_location, documents.to_string_lossy());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dot_files_are_hidden_on_linux() {
+        let metadata = std::fs::metadata(std::env::temp_dir()).expect("temp dir metadata");
+
+        assert!(flags_from_metadata(OsStr::new(".config"), &metadata).hidden);
+        assert!(!flags_from_metadata(OsStr::new("Documents"), &metadata).hidden);
     }
 }

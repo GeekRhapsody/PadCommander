@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{
-    env, fs, io,
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -133,7 +133,7 @@ pub fn clamp_ui_scale(ui_scale: f32) -> f32 {
 }
 
 pub fn config_file_path() -> PathBuf {
-    config_dir().join("settings.json")
+    crate::platform::config_dir().join("settings.json")
 }
 
 pub fn load() -> io::Result<Settings> {
@@ -158,13 +158,6 @@ pub fn save_to_path(settings: &Settings, path: &Path) -> io::Result<()> {
     let contents =
         serde_json::to_string_pretty(&settings.clone().sanitize()).map_err(io::Error::other)?;
     fs::write(path, contents)
-}
-
-fn config_dir() -> PathBuf {
-    env::var_os("APPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(env::temp_dir)
-        .join("PadCommander")
 }
 
 #[cfg(test)]

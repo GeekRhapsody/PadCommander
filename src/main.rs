@@ -15,7 +15,7 @@ mod ui;
 use app::{APP_TITLE, PadCommanderApp};
 
 fn main() -> eframe::Result {
-    let native_options = platform::windows::native_options(APP_TITLE);
+    let native_options = platform::native_options(APP_TITLE);
 
     eframe::run_native(
         APP_TITLE,
