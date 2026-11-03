@@ -50,6 +50,7 @@ pub struct ButtonImages {
     pub dpad_right: Btn,
     pub dpad_all: Btn,
     pub l3: Btn,
+    pub r3: Btn,
     pub start: Btn,
     pub select: Btn,
 }
@@ -105,6 +106,10 @@ impl ButtonImages {
                 l3: Btn::new(
                     include_bytes!("../../assets/buttons/xbox/T_X_Left_Stick_Click_Alt.png"),
                     "b://x_l3",
+                ),
+                r3: Btn::new(
+                    include_bytes!("../../assets/buttons/xbox/T_X_Right_Stick_Click_Alt.png"),
+                    "b://x_r3",
                 ),
                 start: Btn::new(
                     include_bytes!("../../assets/buttons/xbox/T_X_X_Alt.png"),
@@ -164,6 +169,10 @@ impl ButtonImages {
                     include_bytes!("../../assets/buttons/ps4/T_P4_L3.png"),
                     "b://p4_l3",
                 ),
+                r3: Btn::new(
+                    include_bytes!("../../assets/buttons/ps4/T_P4_R3.png"),
+                    "b://p4_r3",
+                ),
                 start: Btn::new(
                     include_bytes!("../../assets/buttons/ps4/T_P4_Options.png"),
                     "b://p4_start",
@@ -222,6 +231,10 @@ impl ButtonImages {
                     include_bytes!("../../assets/buttons/ps5/T_P5_L3_Alt.png"),
                     "b://p5_l3",
                 ),
+                r3: Btn::new(
+                    include_bytes!("../../assets/buttons/ps5/T_P5_R3_Alt.png"),
+                    "b://p5_r3",
+                ),
                 start: Btn::new(
                     include_bytes!("../../assets/buttons/ps5/T_P5_Options_Alt.png"),
                     "b://p5_start",
@@ -279,6 +292,10 @@ impl ButtonImages {
                 l3: Btn::new(
                     include_bytes!("../../assets/buttons/nintendo/T_S_L_Alt.png"),
                     "b://ns_l3",
+                ),
+                r3: Btn::new(
+                    include_bytes!("../../assets/buttons/nintendo/T_S_R_Alt.png"),
+                    "b://ns_r3",
                 ),
                 start: Btn::new(
                     include_bytes!("../../assets/buttons/nintendo/T_S_Plus_Alt.png"),

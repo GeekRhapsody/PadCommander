@@ -259,12 +259,12 @@ impl TextInputPurpose {
             TextInputPurpose::CreateFile => "Create File",
             TextInputPurpose::CreateTextFile => "Create Text File",
             TextInputPurpose::Rename => "Rename",
-            TextInputPurpose::ConnectFtp => "Connect FTP",
+            TextInputPurpose::ConnectFtp => "Server Address",
             TextInputPurpose::ArchiveName => "Archive Name",
             TextInputPurpose::ArchiveDestination => "Extract To Folder",
             TextInputPurpose::ArchivePassword => "Archive Password",
             TextInputPurpose::ShortcutName => "Shortcut Name",
-            TextInputPurpose::FtpProfileField => "FTP Profile Field",
+            TextInputPurpose::FtpPassword => "Password",
         }
     }
 

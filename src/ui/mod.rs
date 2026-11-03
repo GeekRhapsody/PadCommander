@@ -400,6 +400,7 @@ fn command_group(action: &CommanderAction) -> &'static str {
         | CommanderAction::MoveToOtherPane
         | CommanderAction::CreateShortcutInOtherPane => "TRANSFER",
         CommanderAction::CompressToOtherPane | CommanderAction::DecompressToOtherPane => "ARCHIVE",
+        CommanderAction::ConnectFtp | CommanderAction::DisconnectFtp => "REMOTE",
         CommanderAction::Delete => "REMOVE",
         _ => "ORGANIZE",
     }
@@ -417,6 +418,8 @@ fn command_label(entry: &CommandMenuEntry, other_pane: &str) -> String {
         CommanderAction::CreateFolder => "New folder".to_owned(),
         CommanderAction::CreateTextFile => "New text file".to_owned(),
         CommanderAction::OpenSortBy => "Sort by…".to_owned(),
+        CommanderAction::ConnectFtp => "Connect to server…".to_owned(),
+        CommanderAction::DisconnectFtp => "Disconnect from server".to_owned(),
         _ => entry.label.to_owned(),
     }
 }
@@ -426,7 +429,9 @@ fn command_note(action: &CommanderAction, state: &AppState, marked_count: usize)
         return None;
     }
     let what = if marked_count > 1 { "them" } else { "it" };
-    Some(if state.settings.use_recycle_bin {
+    Some(if state.active_pane_is_on_server() {
+        format!("Deletes {what} permanently from the server")
+    } else if state.settings.use_recycle_bin {
         format!("Moves {what} to the Recycle Bin")
     } else {
         format!("Deletes {what} permanently")
@@ -441,6 +446,7 @@ fn command_shortcut(action: &CommanderAction) -> Option<&'static str> {
         CommanderAction::Rename => Some("F2"),
         CommanderAction::Delete => Some("F8"),
         CommanderAction::CreateTextFile => Some("Ctrl+T"),
+        CommanderAction::ConnectFtp => Some("Ctrl+F"),
         _ => None,
     }
 }
@@ -531,6 +537,12 @@ fn paint_command_icon(
             line(vec![p(13.0, 3.0), p(13.0, 15.0)]);
             line(vec![p(10.5, 12.5), p(13.0, 15.0), p(15.5, 12.5)]);
         }
+        CommanderAction::ConnectFtp | CommanderAction::DisconnectFtp => {
+            painter.circle_stroke(p(9.0, 9.0), rect.width() * 7.0 / 18.0, stroke);
+            line(vec![p(2.0, 9.0), p(16.0, 9.0)]);
+            line(vec![p(9.0, 2.0), p(6.5, 9.0), p(9.0, 16.0)]);
+            line(vec![p(9.0, 2.0), p(11.5, 9.0), p(9.0, 16.0)]);
+        }
         CommanderAction::Delete => {
             line(vec![p(2.5, 5.0), p(15.5, 5.0)]);
             line(vec![p(6.5, 5.0), p(6.5, 2.5), p(11.5, 2.5), p(11.5, 5.0)]);
@@ -607,6 +619,8 @@ fn modal_overlay(
         | DialogState::TransferConflict(_)
         | DialogState::Settings(_)
         | DialogState::Favourites(_)
+        | DialogState::FtpServers(_)
+        | DialogState::SavePassword(_)
         | DialogState::Decompress(_)
         | DialogState::SortBy(_)
         | DialogState::OperationProgress(_) => &state.dialog,
@@ -629,7 +643,17 @@ fn modal_overlay(
                     DialogState::DeleteConfirm(confirm) => {
                         let count = confirm.item_count();
                         let items_label = if count == 1 { "item" } else { "item(s)" };
-                        if state.settings.use_recycle_bin {
+                        let on_server = confirm
+                            .items
+                            .iter()
+                            .any(|entry| crate::ftp::is_ftp_location(&entry.virtual_path));
+                        if on_server {
+                            ui.heading("Delete from Server");
+                            ui.label(format!(
+                                "Permanently delete {} {} from the server?",
+                                count, items_label
+                            ));
+                        } else if state.settings.use_recycle_bin {
                             ui.heading("Delete to Recycle Bin");
                             ui.label(format!(
                                 "Move {} {} to the Recycle Bin?",
@@ -864,6 +888,83 @@ fn modal_overlay(
                             ui.label("close");
                         });
                     }
+                    DialogState::FtpServers(servers) => {
+                        ui.heading("Servers");
+                        ui.label(egui::RichText::new("FTP and FTPS connections").color(tc.muted));
+                        ui.add_space(8.0);
+                        let rows = state
+                            .settings
+                            .ftp_servers
+                            .iter()
+                            .map(|server| {
+                                if server.saved_password.is_some() {
+                                    format!("{}  (password saved)", server.label())
+                                } else {
+                                    server.label()
+                                }
+                            })
+                            .chain(["+ Add server".to_owned()]);
+                        for (index, label) in rows.enumerate() {
+                            let mut button = egui::Button::new(label);
+                            if index == servers.focused_index {
+                                button = button
+                                    .fill(tc.focused_fill)
+                                    .stroke(egui::Stroke::new(1.5_f32, tc.focused_stroke));
+                            }
+                            if ui.add_sized([ui.available_width(), 34.0], button).clicked() {
+                                actions.push(CommanderAction::FocusFtpServer(index));
+                                actions.push(CommanderAction::Confirm);
+                            }
+                        }
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            btn(ui, images.dpad_all);
+                            ui.label("move");
+                            ui.label(" · ");
+                            btn(ui, images.south);
+                            ui.label("connect");
+                            ui.label(" · ");
+                            btn(ui, images.north);
+                            ui.label("add");
+                            ui.label(" · ");
+                            btn(ui, images.west);
+                            ui.label("remove");
+                            ui.label(" · ");
+                            btn(ui, images.east);
+                            ui.label("close");
+                        });
+                    }
+                    DialogState::SavePassword(prompt) => {
+                        ui.heading("Save Password?");
+                        ui.label(format!(
+                            "Remember the password for {} on this device?",
+                            prompt.server_label
+                        ));
+                        ui.label(
+                            egui::RichText::new(
+                                "It is encrypted with a key stored next to your settings.",
+                            )
+                            .color(tc.muted),
+                        );
+                        ui.add_space(8.0);
+                        for (index, label) in ["Save password", "Don't save"].iter().enumerate() {
+                            let mut button = egui::Button::new(*label);
+                            if index == prompt.focused_index {
+                                button = button
+                                    .fill(tc.focused_fill)
+                                    .stroke(egui::Stroke::new(1.5_f32, tc.focused_stroke));
+                            }
+                            if ui.add_sized([ui.available_width(), 34.0], button).clicked() {
+                                if index == 0 {
+                                    actions.push(CommanderAction::Confirm);
+                                } else {
+                                    actions.push(CommanderAction::Cancel);
+                                }
+                            }
+                        }
+                        ui.add_space(8.0);
+                        gamepad_hint_move_select_cancel(ui, images);
+                    }
                     DialogState::Decompress(decompress) => {
                         ui.heading("Decompress");
                         ui.label(&decompress.archive.display_name);
@@ -1078,7 +1179,7 @@ fn mapping_grid_left(ui: &mut egui::Ui, images: &ButtonImages) {
                 btn(ui, images.dpad_left);
                 btn(ui, images.dpad_right);
             });
-            mapping_row(ui, "Parent folder", "Backspace", "—");
+            mapping_row_img(ui, "Parent folder", "Backspace", |ui| btn(ui, images.east));
             mapping_row_img(ui, "Open / confirm", "Enter", |ui| btn(ui, images.south));
             mapping_row_img(ui, "Cancel / back", "Esc", |ui| btn(ui, images.east));
             mapping_row_img(ui, "Toggle mark", "Space", |ui| btn(ui, images.west));
@@ -1104,9 +1205,14 @@ fn mapping_grid_right(ui: &mut egui::Ui, images: &ButtonImages) {
 
             mapping_row_img(ui, "Delete", "F8 / Delete", |ui| btn(ui, images.north));
             mapping_row_img(ui, "Refresh", "Ctrl+R", |ui| btn(ui, images.north));
-            mapping_row_img(ui, "Favourites", "F3 / Ctrl+F", |ui| btn(ui, images.l3));
-            mapping_row_img(ui, "Command menu", "—", |ui| btn(ui, images.north));
-            mapping_row_img(ui, "Settings", "—", |ui| btn(ui, images.start));
+            mapping_row_img(ui, "Command menu", "F9", |ui| btn(ui, images.north));
+            mapping_row_img(ui, "Favourites", "F3 / Ctrl+D", |ui| btn(ui, images.l3));
+            mapping_row_img(ui, "Servers (FTP)", "Ctrl+F", |ui| btn(ui, images.r3));
+            mapping_row_img(ui, "List: add / remove", "Insert / Delete", |ui| {
+                btn(ui, images.north);
+                btn(ui, images.west);
+            });
+            mapping_row_img(ui, "Settings", "F10", |ui| btn(ui, images.start));
             mapping_row_img(ui, "Input help", "F1", |ui| btn(ui, images.select));
             mapping_row_img(ui, "OSK: navigate", "Arrow keys", |ui| {
                 btn(ui, images.dpad_all)

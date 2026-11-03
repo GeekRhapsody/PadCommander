@@ -17,7 +17,9 @@ pub enum DialogState {
     TransferConflict(TransferConflictState),
     CommandMenu(CommandMenuState),
     Settings(SettingsModalState),
-    Favourites(FavouritesModalState),
+    Favourites(ListModalState),
+    FtpServers(ListModalState),
+    SavePassword(SavePasswordState),
     Decompress(DecompressModalState),
     SortBy(SortByModalState),
     OperationProgress(TaskId),
@@ -66,19 +68,20 @@ pub enum SettingsModalFocus {
     Quit,
 }
 
+/// Focus for a vertical list dialog (Favourites, Servers).
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct FavouritesModalState {
+pub struct ListModalState {
     pub focused_index: usize,
 }
 
-impl FavouritesModalState {
-    pub fn move_focus(&mut self, movement: SelectionMovement, favourite_count: usize) {
-        if favourite_count == 0 {
+impl ListModalState {
+    pub fn move_focus(&mut self, movement: SelectionMovement, row_count: usize) {
+        if row_count == 0 {
             self.focused_index = 0;
             return;
         }
 
-        let last_index = favourite_count - 1;
+        let last_index = row_count - 1;
         self.focused_index = match movement {
             SelectionMovement::Up | SelectionMovement::PageUp => {
                 self.focused_index.saturating_sub(1)
@@ -91,12 +94,28 @@ impl FavouritesModalState {
         };
     }
 
-    pub fn clamp_focus(&mut self, favourite_count: usize) {
-        if favourite_count == 0 {
+    pub fn clamp_focus(&mut self, row_count: usize) {
+        if row_count == 0 {
             self.focused_index = 0;
         } else {
-            self.focused_index = self.focused_index.min(favourite_count - 1);
+            self.focused_index = self.focused_index.min(row_count - 1);
         }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SavePasswordState {
+    pub side: PaneSide,
+    pub server_label: String,
+    pub focused_index: usize,
+}
+
+impl SavePasswordState {
+    pub fn move_focus(&mut self, movement: SelectionMovement) {
+        self.focused_index = match movement {
+            SelectionMovement::Up | SelectionMovement::PageUp | SelectionMovement::Home => 0,
+            SelectionMovement::Down | SelectionMovement::PageDown | SelectionMovement::End => 1,
+        };
     }
 }
 
@@ -249,13 +268,13 @@ pub struct CommandMenuState {
 
 impl Default for CommandMenuState {
     fn default() -> Self {
-        Self::new(false)
+        Self::new(false, true, false)
     }
 }
 
 impl CommandMenuState {
-    pub fn new(include_create_shortcut: bool) -> Self {
-        // Grouped as the actions sheet shows them: transfer, archive, organize, remove.
+    pub fn new(include_create_shortcut: bool, include_archives: bool, on_ftp_pane: bool) -> Self {
+        // Grouped as the actions sheet shows them: transfer, archive, organize, remote, remove.
         let mut entries = vec![
             CommandMenuEntry::new("Copy", CommanderAction::CopyToOtherPane),
             CommandMenuEntry::new("Move", CommanderAction::MoveToOtherPane),
@@ -268,13 +287,23 @@ impl CommandMenuState {
             ));
         }
 
+        if include_archives {
+            entries.extend([
+                CommandMenuEntry::new("Compress", CommanderAction::CompressToOtherPane),
+                CommandMenuEntry::new("Decompress", CommanderAction::DecompressToOtherPane),
+            ]);
+        }
+
         entries.extend([
-            CommandMenuEntry::new("Compress", CommanderAction::CompressToOtherPane),
-            CommandMenuEntry::new("Decompress", CommanderAction::DecompressToOtherPane),
             CommandMenuEntry::new("Create Folder", CommanderAction::CreateFolder),
             CommandMenuEntry::new("Create Text File", CommanderAction::CreateTextFile),
             CommandMenuEntry::new("Rename", CommanderAction::Rename),
             CommandMenuEntry::new("Sort By", CommanderAction::OpenSortBy),
+            if on_ftp_pane {
+                CommandMenuEntry::new("Disconnect", CommanderAction::DisconnectFtp)
+            } else {
+                CommandMenuEntry::new("Connect to Server", CommanderAction::ConnectFtp)
+            },
             CommandMenuEntry::new("Delete", CommanderAction::Delete),
         ]);
 
@@ -433,8 +462,8 @@ pub struct TransferConflictState {
     pub kind: TaskKind,
     pub source_side: PaneSide,
     pub target_side: PaneSide,
-    pub source_paths: Vec<PathBuf>,
-    pub target_directory: PathBuf,
+    pub sources: Vec<FileEntry>,
+    pub target_location: String,
     pub conflicts: Vec<String>,
     pub label: String,
     pub focused_index: usize,

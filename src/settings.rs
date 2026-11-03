@@ -1,3 +1,4 @@
+use crate::ftp::FtpServer;
 use serde::{Deserialize, Serialize};
 use std::{
     fs, io,
@@ -94,6 +95,8 @@ pub struct Settings {
     pub last_right_pane_location: Option<String>,
     #[serde(default)]
     pub theme: Theme,
+    #[serde(default)]
+    pub ftp_servers: Vec<FtpServer>,
 }
 
 impl Default for Settings {
@@ -107,6 +110,7 @@ impl Default for Settings {
             last_left_pane_location: None,
             last_right_pane_location: None,
             theme: Theme::Dark,
+            ftp_servers: Vec::new(),
         }
     }
 }
@@ -175,6 +179,14 @@ mod tests {
             last_left_pane_location: Some("C:\\Users".to_owned()),
             last_right_pane_location: Some("D:\\".to_owned()),
             theme: Theme::Light,
+            ftp_servers: vec![FtpServer {
+                host: "nas.local".to_owned(),
+                port: 21,
+                username: "deck".to_owned(),
+                path: "/games".to_owned(),
+                secure: true,
+                saved_password: Some("sealed".to_owned()),
+            }],
         };
 
         let json = serde_json::to_string(&settings).expect("serialize settings");
@@ -194,6 +206,7 @@ mod tests {
         assert!(settings.favourites.is_empty());
         assert_eq!(settings.last_left_pane_location, None);
         assert_eq!(settings.last_right_pane_location, None);
+        assert!(settings.ftp_servers.is_empty());
     }
 
     #[test]
@@ -207,6 +220,7 @@ mod tests {
             last_left_pane_location: None,
             last_right_pane_location: None,
             theme: Theme::Dark,
+            ftp_servers: Vec::new(),
         }
         .sanitize();
 

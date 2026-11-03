@@ -48,11 +48,14 @@ impl eframe::App for PadCommanderApp {
 
         let actions = self.input_manager.collect_actions(
             &ctx,
-            self.state.text_dialog_is_open(),
-            self.state.settings_dialog_is_open(),
-            self.state.favourites_dialog_is_open(),
-            self.state.modal_is_active(),
-            self.state.show_input_help,
+            input::InputContext {
+                text_input: self.state.text_dialog_is_open(),
+                settings: self.state.settings_dialog_is_open(),
+                favourites: self.state.favourites_dialog_is_open(),
+                servers: self.state.ftp_servers_dialog_is_open(),
+                modal: self.state.modal_is_active(),
+                input_help: self.state.show_input_help,
+            },
         );
         for action in actions {
             self.handle_action(&ctx, action);

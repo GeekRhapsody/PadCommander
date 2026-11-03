@@ -1,7 +1,7 @@
 use eframe::egui;
 
 use crate::{
-    action::{CommanderAction, TextInputAction},
+    action::{CommanderAction, TextInputAction, TextInputPurpose},
     state::{AppState, DialogState, KeyboardLayer, OnScreenKey, TextInputDialogState},
     theme::{self, ThemeColors},
     ui::button_images::{ButtonImages, btn_sized},
@@ -119,12 +119,17 @@ fn input_field(ui: &mut egui::Ui, dialog: &TextInputDialogState, tc: &ThemeColor
 
     let text_rect = rect.shrink2(egui::vec2(18.0, 0.0));
     let font = theme::mono(FIELD_FONT_SIZE);
-    let before_cursor: String = dialog.value.chars().take(dialog.cursor).collect();
+    let shown_value = if dialog.purpose == TextInputPurpose::FtpPassword {
+        "*".repeat(dialog.value.chars().count())
+    } else {
+        dialog.value.clone()
+    };
+    let before_cursor: String = shown_value.chars().take(dialog.cursor).collect();
     let cursor_x = painter
         .layout_no_wrap(before_cursor, font.clone(), tc.text)
         .size()
         .x;
-    let galley = painter.layout_no_wrap(dialog.value.clone(), font, tc.text);
+    let galley = painter.layout_no_wrap(shown_value, font, tc.text);
 
     // Scroll long names so the cursor always stays inside the field.
     let max_x = text_rect.width() - 4.0;

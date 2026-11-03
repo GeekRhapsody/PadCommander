@@ -1,14 +1,17 @@
 use crate::{
     action::{CommanderAction, TextInputAction, TextInputPurpose},
     fs::{self, LocalFileSystem, VirtualFileSystem},
-    platform,
+    ftp::{self, FtpConnection, FtpServer},
+    platform, secrets,
     settings::{self, Settings, UI_SCALE_STEP},
-    tasks::{DeleteMode, TaskId, TaskKind, TaskManager, TaskStatus},
+    tasks::{DeleteMode, TaskId, TaskKind, TaskManager, TaskOutcome, TaskStatus},
 };
 
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
+    sync::{Arc, mpsc},
+    thread,
 };
 
 mod dialogs;
@@ -20,7 +23,7 @@ use dialogs::{DecompressRequest, PendingShortcutRequest, ShortcutRequest};
 pub use pane::*;
 pub use text_input::*;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub enum PaneSide {
     Left,
     Right,
@@ -83,6 +86,30 @@ pub struct AppState {
     pub transfer_task_panes: BTreeMap<TaskId, Vec<PaneSide>>,
     pending_shortcut_request: Option<PendingShortcutRequest>,
     pending_decompress_request: Option<DecompressRequest>,
+    pending_ftp_server: Option<FtpServer>,
+    ftp_sessions: BTreeMap<PaneSide, FtpSession>,
+    ftp_events_tx: mpsc::Sender<FtpEvent>,
+    ftp_events_rx: mpsc::Receiver<FtpEvent>,
+}
+
+/// A pane connected to an FTP server. Dropped as soon as the pane shows a local location.
+struct FtpSession {
+    connection: Arc<FtpConnection>,
+    return_location: String,
+    offer_save_password: bool,
+}
+
+/// Results of FTP work run on background threads, drained in `poll_tasks`.
+enum FtpEvent {
+    Listed {
+        side: PaneSide,
+        location: String,
+        result: Result<Vec<FileEntry>, String>,
+    },
+    OperationDone {
+        side: PaneSide,
+        result: Result<String, String>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -109,6 +136,7 @@ impl AppState {
             .unwrap_or_else(|| fs::default_open_location(&initial_location));
         settings.last_left_pane_location = Some(left_location.clone());
         settings.last_right_pane_location = Some(right_location.clone());
+        let (ftp_events_tx, ftp_events_rx) = mpsc::channel();
         let mut state = Self {
             settings,
             settings_path,
@@ -125,6 +153,10 @@ impl AppState {
             transfer_task_panes: BTreeMap::new(),
             pending_shortcut_request: None,
             pending_decompress_request: None,
+            pending_ftp_server: None,
+            ftp_sessions: BTreeMap::new(),
+            ftp_events_tx,
+            ftp_events_rx,
         };
 
         state.refresh_pane(PaneSide::Left);
@@ -205,6 +237,8 @@ impl AppState {
             CommanderAction::ToggleMarkSelected => {
                 if matches!(self.dialog, DialogState::Favourites(_)) {
                     self.remove_focused_favourite();
+                } else if matches!(self.dialog, DialogState::FtpServers(_)) {
+                    self.remove_focused_ftp_server();
                 } else {
                     self.toggle_mark_selected();
                 }
@@ -257,12 +291,36 @@ impl AppState {
                 self.begin_text_input(TextInputPurpose::Rename, initial_value);
             }
             CommanderAction::ConnectFtp => {
-                self.begin_text_input(TextInputPurpose::ConnectFtp, String::new())
+                self.dialog = DialogState::FtpServers(ListModalState::default());
+                self.status = "Servers opened.".to_owned();
+            }
+            CommanderAction::AddFtpServer => {
+                self.begin_text_input(TextInputPurpose::ConnectFtp, "ftp://".to_owned())
+            }
+            CommanderAction::RemoveFtpServer => self.remove_focused_ftp_server(),
+            CommanderAction::FocusFtpServer(index) => {
+                if let DialogState::FtpServers(list) = &mut self.dialog {
+                    list.focused_index = index.min(self.settings.ftp_servers.len());
+                }
+            }
+            CommanderAction::DisconnectFtp => {
+                let Some(session) = self.ftp_sessions.get(&self.active_pane) else {
+                    self.status = "This pane is not connected to a server.".to_owned();
+                    return DispatchResult::default();
+                };
+                let location = session.return_location.clone();
+                self.navigate_active_pane(location);
+                self.status = "Disconnected.".to_owned();
+            }
+            CommanderAction::CompressToOtherPane | CommanderAction::DecompressToOtherPane
+                if !self.ftp_sessions.is_empty() =>
+            {
+                self.status = "Archives are not available while a pane is on a server.".to_owned();
             }
             CommanderAction::CompressToOtherPane => self.begin_archive_name_input(),
             CommanderAction::DecompressToOtherPane => self.begin_archive_decompression_choices(),
             CommanderAction::OpenFavourites => {
-                self.dialog = DialogState::Favourites(FavouritesModalState::default());
+                self.dialog = DialogState::Favourites(ListModalState::default());
                 self.status = "Favourites opened.".to_owned();
             }
             CommanderAction::AddFavourite => self.add_active_location_to_favourites(),
@@ -306,6 +364,8 @@ impl AppState {
                 } else {
                     self.dialog = DialogState::CommandMenu(CommandMenuState::new(
                         self.can_create_shortcut_in_other_pane(),
+                        self.ftp_sessions.is_empty(),
+                        self.ftp_sessions.contains_key(&self.active_pane),
                     ));
                     self.status = "Command menu opened.".to_owned();
                 }
@@ -344,15 +404,48 @@ impl AppState {
                     self.status = "No cancellable task is active.".to_owned();
                 }
             }
-            CommanderAction::UploadToOtherPane | CommanderAction::DownloadToOtherPane => {
-                self.set_operation_todo_status(action)
-            }
         }
 
         DispatchResult::default()
     }
 
     pub fn poll_tasks(&mut self) {
+        while let Ok(event) = self.ftp_events_rx.try_recv() {
+            match event {
+                FtpEvent::Listed {
+                    side,
+                    location,
+                    result,
+                } => {
+                    if self.pane(side).current_location != location {
+                        continue;
+                    }
+                    let listed = result.is_ok();
+                    self.apply_listing(side, &location, result);
+
+                    let Some(session) = self.ftp_sessions.get_mut(&side) else {
+                        continue;
+                    };
+                    if !listed || !session.offer_save_password || self.dialog != DialogState::None {
+                        continue;
+                    }
+                    session.offer_save_password = false;
+                    self.dialog = DialogState::SavePassword(SavePasswordState {
+                        side,
+                        server_label: session.connection.server.label(),
+                        focused_index: 0,
+                    });
+                }
+                FtpEvent::OperationDone { side, result } => match result {
+                    Ok(message) => {
+                        self.refresh_pane(side);
+                        self.status = message;
+                    }
+                    Err(error) => self.status = error,
+                },
+            }
+        }
+
         for completion in self.task_manager.poll_completed() {
             let modal_is_showing =
                 matches!(self.dialog, DialogState::OperationProgress(id) if id == completion.id);
@@ -508,11 +601,14 @@ impl AppState {
                     }
                 }
             }
-            FileEntryKind::FtpItem | FileEntryKind::Unknown => {
+            FileEntryKind::FtpItem => {
                 self.status = format!(
-                    "{} cannot be opened by local navigation.",
+                    "Copy {} to a local pane to open it.",
                     selected_entry.display_name
                 );
+            }
+            FileEntryKind::Unknown => {
+                self.status = format!("{} cannot be opened.", selected_entry.display_name);
             }
         }
     }
@@ -588,23 +684,6 @@ impl AppState {
         self.status = format!("{title} text input opened.");
     }
 
-    fn set_operation_todo_status(&mut self, action: CommanderAction) {
-        let sources = self.active_operation_sources();
-        self.status = if sources.is_empty() {
-            format!("{action:?}: no available source items.")
-        } else {
-            format!(
-                "{action:?} would use {} item(s): {}",
-                sources.len(),
-                sources
-                    .iter()
-                    .map(|entry| entry.display_name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        };
-    }
-
     fn confirm_dialog(&mut self) -> DispatchResult {
         match &self.dialog {
             DialogState::TextInput(_) => self.handle_text_input(TextInputAction::Submit),
@@ -635,8 +714,8 @@ impl AppState {
                     conflict.kind,
                     conflict.source_side,
                     conflict.target_side,
-                    conflict.source_paths,
-                    conflict.target_directory,
+                    conflict.sources,
+                    conflict.target_location,
                     conflict.label,
                     true,
                 );
@@ -648,6 +727,61 @@ impl AppState {
             }
             DialogState::Settings(_) => return self.activate_focused_setting(),
             DialogState::Favourites(_) => self.open_focused_favourite(),
+            DialogState::FtpServers(list) => {
+                let Some(server) = self.settings.ftp_servers.get(list.focused_index).cloned()
+                else {
+                    return self.dispatch_action(CommanderAction::AddFtpServer);
+                };
+                self.dialog = DialogState::None;
+                let saved_password = server
+                    .saved_password
+                    .as_deref()
+                    .map(|sealed| secrets::open(&self.config_dir(), sealed));
+                match saved_password {
+                    _ if server.is_anonymous() => self.connect_ftp(server, String::new(), false),
+                    Some(Ok(password)) => self.connect_ftp(server, password, false),
+                    Some(Err(error)) => {
+                        self.pending_ftp_server = Some(server);
+                        self.begin_text_input(TextInputPurpose::FtpPassword, String::new());
+                        self.status = format!("{error} Enter the password.");
+                    }
+                    None => {
+                        self.pending_ftp_server = Some(server);
+                        self.begin_text_input(TextInputPurpose::FtpPassword, String::new());
+                    }
+                }
+            }
+            DialogState::SavePassword(prompt) => {
+                let prompt = prompt.clone();
+                self.dialog = DialogState::None;
+                if prompt.focused_index == 1 {
+                    self.status = "Password not saved.".to_owned();
+                    return DispatchResult::default();
+                }
+                let Some(password) = self
+                    .ftp_sessions
+                    .get(&prompt.side)
+                    .map(|session| session.connection.password.clone())
+                else {
+                    return DispatchResult::default();
+                };
+                let sealed = match secrets::seal(&self.config_dir(), &password) {
+                    Ok(sealed) => sealed,
+                    Err(error) => {
+                        self.status = error;
+                        return DispatchResult::default();
+                    }
+                };
+                if let Some(server) = self
+                    .settings
+                    .ftp_servers
+                    .iter_mut()
+                    .find(|server| server.label() == prompt.server_label)
+                {
+                    server.saved_password = Some(sealed);
+                }
+                self.persist_settings("Password saved on this device.");
+            }
             DialogState::Decompress(decompress) => {
                 let request = decompress.selected_request();
                 let archive_path = PathBuf::from(&request.archive.virtual_path);
@@ -684,6 +818,49 @@ impl AppState {
     fn apply_text_submission(&mut self, purpose: TextInputPurpose, value: String) {
         let side = self.active_pane;
         let location = self.pane(side).current_location.clone();
+        let edits_pane = matches!(
+            purpose,
+            TextInputPurpose::CreateFolder
+                | TextInputPurpose::CreateFile
+                | TextInputPurpose::CreateTextFile
+                | TextInputPurpose::Rename
+        );
+        if edits_pane && ftp::is_ftp_location(&location) {
+            let Some(connection) = self
+                .ftp_sessions
+                .get(&side)
+                .map(|session| Arc::clone(&session.connection))
+            else {
+                self.status = "This pane is not connected to a server.".to_owned();
+                return;
+            };
+            let selected = self
+                .active_pane()
+                .selected_markable_entry()
+                .map(|entry| entry.virtual_path.clone());
+            let events = self.ftp_events_tx.clone();
+            self.status = "Working on the server...".to_owned();
+            thread::spawn(move || {
+                let target = ftp::child_location(&location, &value);
+                let result = match (purpose, selected) {
+                    (TextInputPurpose::Rename, Some(source)) => connection
+                        .run(|stream| ftp::rename(stream, &source, &value))
+                        .map(|()| format!("Renamed to {value}.")),
+                    (TextInputPurpose::Rename, None) => {
+                        Err("No item selected to rename.".to_owned())
+                    }
+                    (TextInputPurpose::CreateFolder, _) => connection
+                        .run(|stream| ftp::create_folder(stream, &target))
+                        .map(|()| format!("Created folder {value}.")),
+                    _ => connection
+                        .run(|stream| ftp::create_empty_file(stream, &target))
+                        .map(|()| format!("Created file {value}.")),
+                };
+                let _ = events.send(FtpEvent::OperationDone { side, result });
+            });
+            return;
+        }
+
         let result = match purpose {
             TextInputPurpose::CreateFolder => self
                 .local_file_system
@@ -715,8 +892,37 @@ impl AppState {
                     .rename_entry(&source, &value)
                     .map(|path| format!("Renamed item to {}.", path.display()))
             }
-            TextInputPurpose::ConnectFtp | TextInputPurpose::FtpProfileField => {
-                self.status = "FTP text fields are reserved for the FTP milestone.".to_owned();
+            TextInputPurpose::ConnectFtp => {
+                let server = match ftp::parse_address(&value) {
+                    Ok(server) => server,
+                    Err(error) => {
+                        self.status = error;
+                        return;
+                    }
+                };
+                if !self
+                    .settings
+                    .ftp_servers
+                    .iter()
+                    .any(|saved| saved.label() == server.label())
+                {
+                    self.settings.ftp_servers.push(server.clone());
+                    self.persist_settings("Server saved.");
+                }
+                if server.is_anonymous() {
+                    self.connect_ftp(server, String::new(), false);
+                } else {
+                    self.pending_ftp_server = Some(server);
+                    self.begin_text_input(TextInputPurpose::FtpPassword, String::new());
+                }
+                return;
+            }
+            TextInputPurpose::FtpPassword => {
+                let Some(server) = self.pending_ftp_server.take() else {
+                    self.status = "No server is waiting for a password.".to_owned();
+                    return;
+                };
+                self.connect_ftp(server, value, true);
                 return;
             }
             TextInputPurpose::ArchiveName => {
@@ -768,6 +974,22 @@ impl AppState {
     }
 
     fn start_delete_task(&mut self, confirm: DeleteConfirmationState) {
+        if let Some(session) = self.ftp_sessions.get(&confirm.pane) {
+            let sources = ftp::remote_sources(&confirm.items);
+            let server = session.connection.server.clone();
+            let password = session.connection.password.clone();
+            let label = format!("Deleting {} item(s)", sources.len());
+            let task_id =
+                self.task_manager
+                    .spawn_threaded(TaskKind::Delete, label, true, move |reporter| {
+                        ftp::delete(reporter, server, password, sources)
+                            .unwrap_or_else(TaskOutcome::Failed)
+                    });
+            self.transfer_task_panes.insert(task_id, vec![confirm.pane]);
+            self.dialog = DialogState::OperationProgress(task_id);
+            return;
+        }
+
         let paths: Vec<PathBuf> = confirm
             .items
             .iter()
@@ -868,6 +1090,15 @@ impl AppState {
         ) {
             self.pending_decompress_request = None;
         }
+        if matches!(
+            self.dialog,
+            DialogState::TextInput(TextInputDialogState {
+                purpose: TextInputPurpose::FtpPassword,
+                ..
+            })
+        ) {
+            self.pending_ftp_server = None;
+        }
     }
 
     fn start_create_shortcut(&mut self, request: ShortcutRequest, overwrite: bool) {
@@ -920,27 +1151,34 @@ impl AppState {
             return;
         }
 
-        let source_paths = sources
-            .iter()
-            .map(|entry| PathBuf::from(&entry.virtual_path))
-            .collect::<Vec<_>>();
-        let target_directory = PathBuf::from(&target_location);
+        let target_is_ftp = ftp::is_ftp_location(&target_location);
+        if target_is_ftp && ftp::is_ftp_location(&self.pane(source_side).current_location) {
+            self.status = format!(
+                "{}: transfers between two servers are not supported.",
+                kind.label()
+            );
+            return;
+        }
+
         let label = format!(
             "{} {} item(s) to {}",
             kind.label(),
-            source_paths.len(),
+            sources.len(),
             fs::location_label(&target_location)
         );
 
-        let conflicts: Vec<String> = source_paths
+        // A server pane's listing is the cheapest way to see what already exists there.
+        let target_entries = &self.pane(target_side).entries;
+        let conflicts: Vec<String> = sources
             .iter()
-            .filter_map(|src| {
-                let name = src.file_name()?;
-                let target = target_directory.join(name);
-                if target.exists() {
-                    Some(name.to_string_lossy().into_owned())
+            .map(|entry| entry.display_name.clone())
+            .filter(|name| {
+                if target_is_ftp {
+                    target_entries
+                        .iter()
+                        .any(|entry| &entry.display_name == name)
                 } else {
-                    None
+                    Path::new(&target_location).join(name).exists()
                 }
             })
             .collect();
@@ -950,8 +1188,8 @@ impl AppState {
                 kind,
                 source_side,
                 target_side,
-                source_paths,
-                target_directory,
+                sources,
+                target_location,
                 conflicts,
                 label,
                 focused_index: 0,
@@ -963,8 +1201,8 @@ impl AppState {
             kind,
             source_side,
             target_side,
-            source_paths,
-            target_directory,
+            sources,
+            target_location,
             label,
             false,
         );
@@ -975,35 +1213,83 @@ impl AppState {
         kind: TaskKind,
         source_side: PaneSide,
         target_side: PaneSide,
-        source_paths: Vec<PathBuf>,
-        target_directory: PathBuf,
+        sources: Vec<FileEntry>,
+        target_location: String,
         label: String,
         overwrite: bool,
     ) {
-        let task_id = match kind {
-            TaskKind::Copy if overwrite => self.task_manager.spawn_copy_to_directory_overwrite(
-                label.clone(),
-                source_paths,
-                target_directory,
-            ),
-            TaskKind::Copy => self.task_manager.spawn_copy_to_directory(
-                label.clone(),
-                source_paths,
-                target_directory,
-            ),
-            TaskKind::Move if overwrite => self.task_manager.spawn_move_to_directory_overwrite(
-                label.clone(),
-                source_paths,
-                target_directory,
-            ),
-            TaskKind::Move => self.task_manager.spawn_move_to_directory(
-                label.clone(),
-                source_paths,
-                target_directory,
-            ),
-            _ => {
-                self.status = format!("{} is not a local transfer action.", kind.label());
-                return;
+        let delete_sources = kind == TaskKind::Move;
+        let source_connection = self
+            .ftp_sessions
+            .get(&source_side)
+            .map(|s| Arc::clone(&s.connection));
+        let target_connection = self
+            .ftp_sessions
+            .get(&target_side)
+            .map(|s| Arc::clone(&s.connection));
+        let source_paths: Vec<PathBuf> = sources
+            .iter()
+            .map(|entry| PathBuf::from(&entry.virtual_path))
+            .collect();
+        let target_directory = PathBuf::from(&target_location);
+
+        let task_id = if let Some(connection) = source_connection {
+            let remote_sources = ftp::remote_sources(&sources);
+            let server = connection.server.clone();
+            let password = connection.password.clone();
+            self.task_manager
+                .spawn_threaded(TaskKind::Download, label, true, move |reporter| {
+                    ftp::download(
+                        reporter,
+                        server,
+                        password,
+                        remote_sources,
+                        target_directory,
+                        delete_sources,
+                    )
+                    .unwrap_or_else(TaskOutcome::Failed)
+                })
+        } else if let Some(connection) = target_connection {
+            let server = connection.server.clone();
+            let password = connection.password.clone();
+            self.task_manager
+                .spawn_threaded(TaskKind::Upload, label, true, move |reporter| {
+                    ftp::upload(
+                        reporter,
+                        server,
+                        password,
+                        source_paths,
+                        target_location,
+                        delete_sources,
+                    )
+                    .unwrap_or_else(TaskOutcome::Failed)
+                })
+        } else {
+            match kind {
+                TaskKind::Copy if overwrite => self.task_manager.spawn_copy_to_directory_overwrite(
+                    label.clone(),
+                    source_paths,
+                    target_directory,
+                ),
+                TaskKind::Copy => self.task_manager.spawn_copy_to_directory(
+                    label.clone(),
+                    source_paths,
+                    target_directory,
+                ),
+                TaskKind::Move if overwrite => self.task_manager.spawn_move_to_directory_overwrite(
+                    label.clone(),
+                    source_paths,
+                    target_directory,
+                ),
+                TaskKind::Move => self.task_manager.spawn_move_to_directory(
+                    label.clone(),
+                    source_paths,
+                    target_directory,
+                ),
+                _ => {
+                    self.status = format!("{} is not a local transfer action.", kind.label());
+                    return;
+                }
             }
         };
 
@@ -1204,7 +1490,7 @@ impl AppState {
 
     fn go_back_or_parent(&mut self, side: PaneSide) {
         while let Some(snapshot) = self.pane_mut(side).navigation_history.pop() {
-            if fs::location_exists(&snapshot.location) {
+            if self.location_exists(side, &snapshot.location) {
                 self.pane_mut(side).current_location = snapshot.location.clone();
                 self.remember_pane_location(side);
                 self.refresh_pane(side);
@@ -1212,8 +1498,8 @@ impl AppState {
                 return;
             }
 
-            let fallback_location = fs::parent_location(&snapshot.location);
-            if fs::location_exists(&fallback_location) {
+            let fallback_location = self.parent_of(side, &snapshot.location);
+            if self.location_exists(side, &fallback_location) {
                 self.pane_mut(side).current_location = fallback_location;
                 self.remember_pane_location(side);
                 self.refresh_pane(side);
@@ -1225,7 +1511,7 @@ impl AppState {
     }
 
     fn go_parent(&mut self, side: PaneSide) {
-        let parent = fs::parent_location(&self.pane(side).current_location);
+        let parent = self.parent_of(side, &self.pane(side).current_location);
         self.pane_mut(side).current_location = parent;
         self.remember_pane_location(side);
         self.refresh_pane(side);
@@ -1233,15 +1519,54 @@ impl AppState {
 
     fn refresh_pane(&mut self, side: PaneSide) {
         let location = self.pane(side).current_location.clone();
+        if !ftp::is_ftp_location(&location) {
+            self.ftp_sessions.remove(&side);
+            let result = self
+                .local_file_system
+                .list_location(&location)
+                .map_err(|error| error.user_message());
+            self.pane_mut(side).cached_free_space = fs::get_free_space(&location);
+            self.apply_listing(side, &location, result);
+            return;
+        }
+
+        let Some(connection) = self
+            .ftp_sessions
+            .get(&side)
+            .map(|session| Arc::clone(&session.connection))
+        else {
+            let message = "Not connected. Press Ctrl+F or R3 to open Servers.".to_owned();
+            self.apply_listing(side, &location, Err(message));
+            return;
+        };
+        let parent_location = self.parent_of(side, &location);
+        let events = self.ftp_events_tx.clone();
+        let pane = self.pane_mut(side);
+        pane.load_state = PaneLoadState::Loading;
+        pane.cached_free_space = None;
+        self.status = format!("Loading {location}...");
+        thread::spawn(move || {
+            let result = connection.run(|stream| ftp::list(stream, &location, &parent_location));
+            let _ = events.send(FtpEvent::Listed {
+                side,
+                location,
+                result,
+            });
+        });
+    }
+
+    fn apply_listing(
+        &mut self,
+        side: PaneSide,
+        location: &str,
+        result: Result<Vec<FileEntry>, String>,
+    ) {
         let previous_selection_path = self
             .pane(side)
             .selected_entry()
             .map(|entry| entry.virtual_path.clone());
-        let result = self.local_file_system.list_location(&location);
         let show_hidden_files = self.settings.show_hidden_files;
         let pane = self.pane_mut(side);
-
-        pane.cached_free_space = crate::fs::get_free_space(&location);
 
         match result {
             Ok(entries) => {
@@ -1250,10 +1575,9 @@ impl AppState {
                 pane.retain_valid_marks();
                 pane.restore_selection(previous_selection_path.as_deref());
                 pane.load_state = PaneLoadState::Ready;
-                self.status = format!("Loaded {}.", fs::location_label(&location));
+                self.status = format!("Loaded {}.", fs::location_label(location));
             }
-            Err(error) => {
-                let message = error.user_message();
+            Err(message) => {
                 pane.entries.clear();
                 pane.reset_selection();
                 pane.marked_items.clear();
@@ -1261,6 +1585,31 @@ impl AppState {
                 self.status = message;
             }
         }
+    }
+
+    /// Parent of a pane location; the root of a server leads back to where the pane was before connecting.
+    fn parent_of(&self, side: PaneSide, location: &str) -> String {
+        if !ftp::is_ftp_location(location) {
+            return fs::parent_location(location);
+        }
+
+        ftp::parent_location(location)
+            .or_else(|| {
+                self.ftp_sessions
+                    .get(&side)
+                    .map(|session| session.return_location.clone())
+            })
+            .unwrap_or_else(|| fs::ROOTS_LOCATION.to_owned())
+    }
+
+    fn location_exists(&self, side: PaneSide, location: &str) -> bool {
+        if !ftp::is_ftp_location(location) {
+            return fs::location_exists(location);
+        }
+
+        self.ftp_sessions
+            .get(&side)
+            .is_some_and(|session| location.starts_with(&session.connection.server.root_location()))
     }
 
     fn clear_active_error(&mut self) -> bool {
@@ -1285,6 +1634,15 @@ impl AppState {
             }
             DialogState::Favourites(favourites) => {
                 favourites.move_focus(movement, self.settings.favourites.len());
+                true
+            }
+            DialogState::FtpServers(servers) => {
+                // The extra last row is "Add server".
+                servers.move_focus(movement, self.settings.ftp_servers.len() + 1);
+                true
+            }
+            DialogState::SavePassword(prompt) => {
+                prompt.move_focus(movement);
                 true
             }
             DialogState::Decompress(decompress) => {
@@ -1434,6 +1792,10 @@ impl AppState {
             self.status = "Choose a folder before adding a favourite.".to_owned();
             return;
         }
+        if ftp::is_ftp_location(&location) {
+            self.status = "Servers are saved in Servers, not Favourites.".to_owned();
+            return;
+        }
 
         if !self.settings.favourites.contains(&location) {
             self.settings.favourites.push(location.clone());
@@ -1533,6 +1895,10 @@ impl AppState {
 
     fn remember_pane_location(&mut self, side: PaneSide) {
         let location = self.pane(side).current_location.clone();
+        // Server sessions are not restored on launch, so only local folders are remembered.
+        if ftp::is_ftp_location(&location) {
+            return;
+        }
         match side {
             PaneSide::Left => self.settings.last_left_pane_location = Some(location),
             PaneSide::Right => self.settings.last_right_pane_location = Some(location),
@@ -1586,11 +1952,60 @@ impl AppState {
 
     pub fn can_create_shortcut_in_other_pane(&self) -> bool {
         platform::SUPPORTS_SHORTCUTS
+            && self.ftp_sessions.is_empty()
             && self
                 .active_pane()
                 .selected_markable_entry()
                 .map(FileEntry::is_exe_file)
                 .unwrap_or(false)
+    }
+
+    pub fn ftp_servers_dialog_is_open(&self) -> bool {
+        matches!(self.dialog, DialogState::FtpServers(_))
+    }
+
+    pub fn active_pane_is_on_server(&self) -> bool {
+        self.ftp_sessions.contains_key(&self.active_pane)
+    }
+
+    fn config_dir(&self) -> PathBuf {
+        self.settings_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(platform::config_dir)
+    }
+
+    fn connect_ftp(&mut self, server: FtpServer, password: String, offer_save_password: bool) {
+        let side = self.active_pane;
+        let current_location = self.pane(side).current_location.clone();
+        let return_location = match self.ftp_sessions.get(&side) {
+            Some(session) => session.return_location.clone(),
+            None => current_location,
+        };
+        let location = server.start_location();
+        self.ftp_sessions.insert(
+            side,
+            FtpSession {
+                connection: Arc::new(FtpConnection::new(server, password)),
+                return_location,
+                offer_save_password,
+            },
+        );
+        self.navigate_active_pane(location);
+    }
+
+    fn remove_focused_ftp_server(&mut self) {
+        let DialogState::FtpServers(servers) = &mut self.dialog else {
+            return;
+        };
+        if servers.focused_index >= self.settings.ftp_servers.len() {
+            self.status = "No server selected.".to_owned();
+            return;
+        }
+
+        let removed = self.settings.ftp_servers.remove(servers.focused_index);
+        servers.clamp_focus(self.settings.ftp_servers.len() + 1);
+        self.persist_settings(&format!("Removed {}.", removed.label()));
     }
 
     fn text_dialog_mut(&mut self) -> Option<&mut TextInputDialogState> {
@@ -1604,6 +2019,8 @@ impl AppState {
             | DialogState::CommandMenu(_)
             | DialogState::Settings(_)
             | DialogState::Favourites(_)
+            | DialogState::FtpServers(_)
+            | DialogState::SavePassword(_)
             | DialogState::Decompress(_)
             | DialogState::SortBy(_)
             | DialogState::OperationProgress(_) => None,
@@ -1713,6 +2130,7 @@ mod tests {
     }
 
     fn test_state() -> AppState {
+        let (ftp_events_tx, ftp_events_rx) = mpsc::channel();
         AppState {
             settings: Settings::default(),
             settings_path: std::env::temp_dir().join("pad_commander_test_settings.json"),
@@ -1750,6 +2168,10 @@ mod tests {
             transfer_task_panes: BTreeMap::new(),
             pending_shortcut_request: None,
             pending_decompress_request: None,
+            pending_ftp_server: None,
+            ftp_sessions: BTreeMap::new(),
+            ftp_events_tx,
+            ftp_events_rx,
         }
     }
 
@@ -2323,5 +2745,138 @@ mod tests {
         }
 
         panic!("state task did not complete");
+    }
+    fn test_server() -> FtpServer {
+        ftp::parse_address("ftp://deck@nas.local:21/").expect("parse server")
+    }
+
+    fn with_ftp_session(state: &mut AppState, side: PaneSide, return_location: &str) {
+        state.ftp_sessions.insert(
+            side,
+            FtpSession {
+                connection: Arc::new(FtpConnection::new(test_server(), "secret".to_owned())),
+                return_location: return_location.to_owned(),
+                offer_save_password: false,
+            },
+        );
+    }
+
+    #[test]
+    fn command_menu_offers_connect_on_local_pane_and_disconnect_on_server_pane() {
+        let mut state = test_state();
+
+        state.dispatch_action(CommanderAction::OpenCommandPalette);
+        let DialogState::CommandMenu(menu) = &state.dialog else {
+            panic!("command menu should open");
+        };
+        let actions: Vec<_> = menu
+            .entries
+            .iter()
+            .map(|entry| entry.action.clone())
+            .collect();
+        assert!(actions.contains(&CommanderAction::ConnectFtp));
+        assert!(actions.contains(&CommanderAction::CompressToOtherPane));
+
+        with_ftp_session(&mut state, PaneSide::Left, fs::ROOTS_LOCATION);
+        state.dispatch_action(CommanderAction::OpenCommandPalette);
+        let DialogState::CommandMenu(menu) = &state.dialog else {
+            panic!("command menu should open");
+        };
+        let actions: Vec<_> = menu
+            .entries
+            .iter()
+            .map(|entry| entry.action.clone())
+            .collect();
+        assert!(actions.contains(&CommanderAction::DisconnectFtp));
+        assert!(!actions.contains(&CommanderAction::CompressToOtherPane));
+    }
+
+    #[test]
+    fn servers_add_row_opens_address_input() {
+        let mut state = test_state();
+
+        state.dispatch_action(CommanderAction::ConnectFtp);
+        state.dispatch_action(CommanderAction::Confirm);
+
+        let DialogState::TextInput(dialog) = &state.dialog else {
+            panic!("address input should open");
+        };
+        assert_eq!(dialog.purpose, TextInputPurpose::ConnectFtp);
+        assert_eq!(dialog.value, "ftp://");
+    }
+
+    #[test]
+    fn submitting_an_address_saves_the_server_and_asks_for_password() {
+        let mut state = test_state();
+
+        state.apply_text_submission(
+            TextInputPurpose::ConnectFtp,
+            "ftp://deck@nas.local/".to_owned(),
+        );
+
+        assert_eq!(state.settings.ftp_servers, vec![test_server()]);
+        assert_eq!(state.pending_ftp_server, Some(test_server()));
+        assert!(matches!(
+            &state.dialog,
+            DialogState::TextInput(dialog) if dialog.purpose == TextInputPurpose::FtpPassword
+        ));
+    }
+
+    #[test]
+    fn removing_a_server_keeps_the_add_row_focusable() {
+        let mut state = test_state();
+        state.settings.ftp_servers.push(test_server());
+        state.dialog = DialogState::FtpServers(ListModalState::default());
+
+        state.dispatch_action(CommanderAction::RemoveFtpServer);
+
+        assert!(state.settings.ftp_servers.is_empty());
+        assert_eq!(
+            state.dialog,
+            DialogState::FtpServers(ListModalState::default())
+        );
+    }
+
+    #[test]
+    fn parent_of_server_root_returns_to_previous_local_location() {
+        let mut state = test_state();
+        with_ftp_session(&mut state, PaneSide::Left, "C:\\Games");
+
+        assert_eq!(
+            state.parent_of(PaneSide::Left, "ftp://nas.local:21/pub"),
+            "ftp://nas.local:21/"
+        );
+        assert_eq!(
+            state.parent_of(PaneSide::Left, "ftp://nas.local:21/"),
+            "C:\\Games"
+        );
+        assert!(state.location_exists(PaneSide::Left, "ftp://nas.local:21/pub"));
+        assert!(!state.location_exists(PaneSide::Right, "ftp://nas.local:21/pub"));
+    }
+
+    #[test]
+    fn transfers_between_two_server_panes_are_rejected() {
+        let mut state = test_state();
+        state.left_pane.current_location = "ftp://nas.local:21/".to_owned();
+        state.right_pane.current_location = "ftp://other:21/".to_owned();
+
+        state.dispatch_action(CommanderAction::CopyToOtherPane);
+
+        assert_eq!(state.dialog, DialogState::None);
+        assert!(state.status.contains("two servers"));
+    }
+
+    #[test]
+    fn server_locations_are_not_remembered_for_next_launch() {
+        let mut state = test_state();
+        state.settings.last_left_pane_location = Some("C:\\Games".to_owned());
+        state.left_pane.current_location = "ftp://nas.local:21/".to_owned();
+
+        state.remember_pane_location(PaneSide::Left);
+
+        assert_eq!(
+            state.settings.last_left_pane_location.as_deref(),
+            Some("C:\\Games")
+        );
     }
 }

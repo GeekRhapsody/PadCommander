@@ -40,6 +40,7 @@ PadCommander is a full-screen, gamepad-first two-pane file manager for Windows a
 - **Gamepad as first-class input** — full navigation and file operations from a controller
 - **On-screen keyboard** — enter filenames and paths without touching a keyboard
 - **File operations** — copy, move, delete, compress, and decompress archives
+- **FTP and FTPS servers** — open a server in either pane and copy or move files to and from it, with saved servers and optional saved passwords
 - **Controller auto-detection** — supports Xbox, PlayStation 4/5, and Nintendo Switch controllers
 - **Theme support** — Dark and Light modes
 - **Configurable UI scale** — adjust the interface scale to suit your display
@@ -74,12 +75,19 @@ Launch the application and use your gamepad or keyboard to navigate. The two pan
 
 | Action | Button |
 |---|---|
-| Navigate | Left stick / D-pad |
+| Move selection | D-pad up / down |
+| Switch pane | D-pad left / right |
+| Page up / down | LB / RB |
 | Confirm / Open | A (Xbox) / Cross (PS) |
 | Back / Up a directory | B (Xbox) / Circle (PS) |
-| Switch pane | Left / Right bumper |
-| File operations menu | Y (Xbox) / Triangle (PS) |
-| On-screen keyboard | X (Xbox) / Square (PS) |
+| Mark item | X (Xbox) / Square (PS) |
+| Actions menu | Y (Xbox) / Triangle (PS) |
+| Favourites | L3 (press left stick) |
+| Servers (FTP) | R3 (press right stick) |
+| Settings | Start / Options |
+| Input help | View / Select |
+
+In the Favourites and Servers lists, Y adds an entry and X removes the focused one.
 
 ### Keyboard Controls
 
@@ -87,11 +95,25 @@ Launch the application and use your gamepad or keyboard to navigate. The two pan
 |---|---|
 | Navigate | Arrow keys |
 | Confirm / Open | Enter |
-| Back | Backspace |
+| Parent folder | Backspace |
 | Switch pane | Tab |
+| Mark item | Space |
+| Rename | F2 |
+| Favourites | F3 / Ctrl+D |
 | Copy | F5 |
 | Move | F6 |
-| Delete | F8 |
+| New folder | F7 |
+| Delete | F8 / Delete |
+| Actions menu | F9 |
+| Settings | F10 |
+| Servers (FTP) | Ctrl+F |
+| Input help | F1 |
+
+In the Favourites and Servers lists, Insert adds an entry and Delete removes the focused one.
+
+### FTP Servers
+
+Open **Servers** (Ctrl+F / R3), choose **Add server** and type an address such as `ftp://user@nas.local/media` or `ftps://user@example.com:21/` on the on-screen keyboard. Leave out the user for anonymous FTP. After the first successful login you can save the password on the device; it is encrypted with a key kept in `secret.key` next to `settings.json`, so the settings file alone cannot reveal it. With one pane on a server and the other on a local folder, Copy and Move upload or download. Back out of the server root, or pick **Disconnect from server** in the actions menu, to return to the local folder.
 
 ## Configuration
 
@@ -100,6 +122,7 @@ Settings are saved automatically and persist between sessions. You can configure
 - **Theme** — Dark or Light
 - **UI Scale** — adjust interface size (minimum 0.5×)
 - **Controller type** — auto-detect or force a specific controller layout (Xbox, PS4/5, Switch)
+- **Servers** — saved FTP/FTPS servers and, if you chose to save them, their encrypted passwords
 
 ## Tech Stack
 
@@ -108,6 +131,8 @@ Settings are saved automatically and persist between sessions. You can configure
 | GUI | [egui](https://github.com/emilk/egui) / [eframe](https://github.com/emilk/egui/tree/master/crates/eframe) |
 | Gamepad input | [gilrs](https://gitlab.com/gilrs-project/gilrs) |
 | Archive support | zip, unarc-rs |
+| FTP / FTPS | suppaftp (rustls) |
+| Saved passwords | chacha20poly1305 |
 | Platform APIs | windows, windows-sys (Windows); libc, trash (Linux) |
 | Serialization | serde / serde_json |
 
