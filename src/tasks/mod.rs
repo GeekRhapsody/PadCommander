@@ -314,6 +314,10 @@ impl TaskManager {
         self.queue.task_by_id(id)
     }
 
+    pub fn active_task(&self) -> Option<&TaskProgress> {
+        self.queue.active_task()
+    }
+
     pub fn spawn_threaded<F>(
         &mut self,
         kind: TaskKind,
@@ -501,6 +505,23 @@ pub struct TaskQueue {
     tasks: BTreeMap<TaskId, TaskProgress>,
     order: VecDeque<TaskId>,
     retained_finished: usize,
+}
+
+#[cfg(test)]
+impl TaskQueue {
+    fn active_count(&self) -> usize {
+        self.tasks
+            .values()
+            .filter(|task| task.status.is_active())
+            .count()
+    }
+
+    fn failed_count(&self) -> usize {
+        self.tasks
+            .values()
+            .filter(|task| task.status == TaskStatus::Failed)
+            .count()
+    }
 }
 
 impl Default for TaskQueue {

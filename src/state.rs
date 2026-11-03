@@ -1843,74 +1843,6 @@ pub struct FileEntry {
 }
 
 impl FileEntry {
-    pub fn type_display_label(&self) -> &'static str {
-        match self.kind {
-            FileEntryKind::Directory => "Directory",
-            FileEntryKind::Drive => "Drive",
-            FileEntryKind::Archive => "Archive",
-            FileEntryKind::Parent => "Parent",
-            FileEntryKind::FtpItem => "FTP",
-            FileEntryKind::Unknown => "Unknown",
-            FileEntryKind::File => {
-                let ext = Path::new(&self.virtual_path)
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .map(|e| e.to_ascii_lowercase());
-                match ext.as_deref() {
-                    Some("png") => "PNG Image",
-                    Some("jpg") | Some("jpeg") => "JPEG Image",
-                    Some("gif") => "GIF Image",
-                    Some("bmp") => "Bitmap Image",
-                    Some("ico") => "Icon",
-                    Some("svg") => "SVG Image",
-                    Some("webp") => "WebP Image",
-                    Some("tiff") | Some("tif") => "TIFF Image",
-                    Some("pdf") => "PDF Document",
-                    Some("doc") => "Word Document",
-                    Some("docx") => "Word Document",
-                    Some("xls") => "Excel Sheet",
-                    Some("xlsx") => "Excel Sheet",
-                    Some("ppt") | Some("pptx") => "Presentation",
-                    Some("odt") => "ODF Document",
-                    Some("txt") => "Text File",
-                    Some("md") => "Markdown",
-                    Some("csv") => "CSV File",
-                    Some("json") => "JSON File",
-                    Some("xml") => "XML File",
-                    Some("yaml") | Some("yml") => "YAML File",
-                    Some("toml") => "TOML File",
-                    Some("ini") | Some("cfg") | Some("conf") => "Config File",
-                    Some("log") => "Log File",
-                    Some("rs") => "Rust Source",
-                    Some("c") => "C Source",
-                    Some("cpp") | Some("cxx") | Some("cc") => "C++ Source",
-                    Some("h") | Some("hpp") => "C/C++ Header",
-                    Some("py") => "Python Script",
-                    Some("js") => "JavaScript",
-                    Some("ts") => "TypeScript",
-                    Some("html") | Some("htm") => "HTML File",
-                    Some("css") => "CSS File",
-                    Some("sh") | Some("bash") => "Shell Script",
-                    Some("ps1") => "PowerShell Script",
-                    Some("bat") | Some("cmd") => "Batch Script",
-                    Some("lua") => "Lua Script",
-                    Some("exe") => "Executable",
-                    Some("dll") => "DLL Library",
-                    Some("so") => "Shared Library",
-                    Some("sys") => "System File",
-                    Some("mp3") | Some("flac") | Some("ogg") | Some("wav") | Some("aac") => {
-                        "Audio File"
-                    }
-                    Some("mp4") | Some("mkv") | Some("avi") | Some("mov") | Some("wmv") => {
-                        "Video File"
-                    }
-                    Some("ttf") | Some("otf") | Some("woff") | Some("woff2") => "Font File",
-                    _ => "File",
-                }
-            }
-        }
-    }
-
     pub fn size_label(&self) -> String {
         match self.size {
             Some(size) => Self::size_value_label(size),
@@ -2027,20 +1959,7 @@ pub struct MarkedSummary {
     pub has_unknown_size: bool,
 }
 
-impl MarkedSummary {
-    pub fn size_label(self) -> String {
-        if self.count == 0 {
-            return "0 items".to_owned();
-        }
-
-        let size_label = FileEntry::size_value_label(self.total_size);
-        if self.has_unknown_size {
-            format!("{} item(s), {size_label} + unknown", self.count)
-        } else {
-            format!("{} item(s), {size_label}", self.count)
-        }
-    }
-}
+impl MarkedSummary {}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PaneSummary {
@@ -2049,25 +1968,7 @@ pub struct PaneSummary {
     pub total_size: u64,
 }
 
-impl PaneSummary {
-    pub fn format(&self) -> String {
-        let size_label = FileEntry::size_value_label(self.total_size);
-        let file_label = if self.file_count == 1 {
-            "file"
-        } else {
-            "files"
-        };
-        let folder_label = if self.folder_count == 1 {
-            "folder"
-        } else {
-            "folders"
-        };
-        format!(
-            "{} {}, {} {} | {size_label}",
-            self.file_count, file_label, self.folder_count, folder_label
-        )
-    }
-}
+impl PaneSummary {}
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2344,9 +2245,10 @@ impl Default for CommandMenuState {
 
 impl CommandMenuState {
     pub fn new(include_create_shortcut: bool) -> Self {
+        // Grouped as the actions sheet shows them: transfer, archive, organize, remove.
         let mut entries = vec![
-            CommandMenuEntry::new("Create Folder", CommanderAction::CreateFolder),
-            CommandMenuEntry::new("Create Text File", CommanderAction::CreateTextFile),
+            CommandMenuEntry::new("Copy", CommanderAction::CopyToOtherPane),
+            CommandMenuEntry::new("Move", CommanderAction::MoveToOtherPane),
         ];
 
         if include_create_shortcut {
@@ -2357,12 +2259,12 @@ impl CommandMenuState {
         }
 
         entries.extend([
-            CommandMenuEntry::new("Copy", CommanderAction::CopyToOtherPane),
-            CommandMenuEntry::new("Move", CommanderAction::MoveToOtherPane),
             CommandMenuEntry::new("Compress", CommanderAction::CompressToOtherPane),
             CommandMenuEntry::new("Decompress", CommanderAction::DecompressToOtherPane),
-            CommandMenuEntry::new("Sort By", CommanderAction::OpenSortBy),
+            CommandMenuEntry::new("Create Folder", CommanderAction::CreateFolder),
+            CommandMenuEntry::new("Create Text File", CommanderAction::CreateTextFile),
             CommandMenuEntry::new("Rename", CommanderAction::Rename),
+            CommandMenuEntry::new("Sort By", CommanderAction::OpenSortBy),
             CommandMenuEntry::new("Delete", CommanderAction::Delete),
         ]);
 
@@ -2636,20 +2538,6 @@ impl TextInputDialogState {
     pub fn focused_key(&self) -> OnScreenKey {
         let row = self.keys()[self.focused_row];
         row[self.focused_col.min(row.len() - 1)]
-    }
-
-    pub fn display_value_with_cursor(&self) -> String {
-        let mut rendered = String::new();
-        for (index, ch) in self.value.chars().enumerate() {
-            if index == self.cursor {
-                rendered.push('|');
-            }
-            rendered.push(ch);
-        }
-        if self.cursor == self.value.chars().count() {
-            rendered.push('|');
-        }
-        rendered
     }
 
     fn press_focused_key(&mut self) -> TextInputOutcome {

@@ -24,6 +24,11 @@ PadCommander is a full-screen, gamepad-first two-pane file manager for Windows, 
   <em>Dual-pane navigation with gamepad input</em>
 </p>
 <p align="center">
+  <img src="assets/screenshots/actions.png" alt="Actions menu" width="700"/>
+  <br/>
+  <em>Actions menu for copying, moving, archiving and organizing marked files</em>
+</p>
+<p align="center">
   <img src="assets/screenshots/osk.png" alt="On-screen keyboard" width="700"/>
   <br/>
   <em>Built-in on-screen keyboard for controller-driven text entry</em>

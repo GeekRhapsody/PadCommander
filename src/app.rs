@@ -20,6 +20,7 @@ impl PadCommanderApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let state = AppState::new();
         apply_ui_scale(&cc.egui_ctx, state.settings.ui_scale);
+        crate::theme::install_fonts(&cc.egui_ctx);
         configure_visuals(&cc.egui_ctx, state.settings.theme);
         egui_extras::install_image_loaders(&cc.egui_ctx);
 
@@ -83,11 +84,27 @@ fn configure_visuals(ctx: &egui::Context, theme: Theme) {
         Theme::Dark => egui::Visuals::dark(),
         Theme::Light => egui::Visuals::light(),
     };
-    visuals.panel_fill = tc.panel_fill;
-    visuals.window_fill = tc.window_fill;
-    visuals.faint_bg_color = tc.faint_bg;
-    visuals.selection.bg_fill = tc.selection_bg;
+    visuals.panel_fill = tc.bg;
+    visuals.window_fill = tc.pane_active;
+    visuals.faint_bg_color = tc.chip;
+    visuals.extreme_bg_color = tc.field;
+    visuals.selection.bg_fill = tc.focused_fill;
+    visuals.selection.stroke = egui::Stroke::new(1.5, tc.focused_stroke);
     visuals.hyperlink_color = tc.accent;
     visuals.override_text_color = Some(tc.text);
+    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, tc.line);
+    for widget in [
+        &mut visuals.widgets.inactive,
+        &mut visuals.widgets.hovered,
+        &mut visuals.widgets.active,
+        &mut visuals.widgets.open,
+    ] {
+        widget.corner_radius = egui::CornerRadius::same(8);
+    }
+    visuals.widgets.inactive.bg_fill = tc.chip;
+    visuals.widgets.inactive.weak_bg_fill = tc.chip;
+    visuals.widgets.hovered.bg_fill = tc.line;
+    visuals.widgets.hovered.weak_bg_fill = tc.line;
     ctx.set_visuals(visuals);
+    ctx.all_styles_mut(crate::theme::configure_text_styles);
 }
