@@ -1,29 +1,26 @@
 # PadCommander Architecture
 
-PadCommander is planned as a Windows-only Rust full-screen graphical two-pane file manager built with `eframe`/`egui`.
+PadCommander is a Windows-only Rust full-screen graphical two-pane file manager built with `eframe`/`egui`.
 
-## Planned Module Layout
+## Module Layout
 
-- `main.rs`: application entry point, native window setup, and full-screen configuration.
-- `app.rs`: top-level `eframe` app integration and frame lifecycle.
-- `state.rs`: central `AppState`, including two `PaneState` values, settings, focus, dialogs, and task summaries.
-- `pane.rs`: pane navigation state, selection state, sorting, filtering, and active item tracking.
-- `action.rs`: shared action/command enum used by gamepad input, keyboard input, and UI controls.
-- `input/`: gamepad and keyboard input mapping into shared actions.
-- `ui/`: egui rendering for panes, command bars, dialogs, progress, settings, and the on-screen keyboard.
-- `vfs/`: `VirtualFileSystem` traits and shared file/navigation types.
-- `vfs/local.rs`: local Windows filesystem implementation.
-- `vfs/ftp.rs`: FTP implementation once network support is added.
-- `ops/`: copy, move, delete, compress, decompress, upload, and download services.
+- `main.rs`: application entry point; starts `eframe` with the native window options.
+- `app.rs`: top-level `eframe` app. Each frame it polls background tasks, collects input actions, renders the UI, and dispatches the resulting actions.
+- `action.rs`: shared `CommanderAction` and `TextInputAction` enums used by gamepad input, keyboard input, and UI controls.
+- `state/`: central `AppState` with two `PaneState` values, settings, favourites, dialogs, and all action handling (`mod.rs`); pane entries, selection, and sorting (`pane.rs`); dialog and modal state (`dialogs.rs`); on-screen keyboard state and filename validation (`text_input.rs`).
+- `input/`: gamepad (`gilrs`) and keyboard mapping into shared actions, including key repeat.
+- `ui/`: egui rendering for panes, top and hint bars, command sheet, modals, progress, settings, controller button glyphs, and the on-screen keyboard.
+- `fs/`: `VirtualFileSystem` trait, the `LocalFileSystem` implementation, drive roots, create/rename/delete, and `VfsError`.
 - `tasks/`: background task manager, task progress, cancellation, and completion reporting.
-- `platform/windows.rs`: small Windows-specific helpers and integration points.
-- `settings.rs`: persisted settings, including UI scaling.
-- `error.rs`: application error types and conversion helpers.
+- `archive.rs`: compress and decompress for `.zip`, `.7z`, and `.rar`, using the `zip` and `unarc-rs` crates and external `7z`/`rar` executables where needed.
+- `platform/windows.rs`: Windows-specific helpers (native window options, drives and volume labels, recycle bin, shell open, `.lnk` shortcuts, free disk space).
+- `settings.rs`: persisted JSON settings in `%APPDATA%\PadCommander\settings.json`, including UI scaling.
+- `theme.rs`: Dark and Light colors and fonts.
 
 ## Core Flow
 
-Gamepad, keyboard, and UI events are translated into `Action` values. The app applies actions to `AppState`, starts background tasks when needed, and renders the latest state each frame. UI modules should not perform filesystem operations directly.
+Gamepad, keyboard, and UI events are translated into `CommanderAction` values. `AppState::dispatch_action` applies them, starting background tasks through the task manager when work is long-running. UI modules render the latest `AppState` each frame and return actions; they do not mutate state or perform filesystem operations directly.
 
 ## Testing Focus
 
-Pure logic and service modules should be tested where practical, especially pane navigation, selection behavior, action handling, path handling, VFS behavior, operation planning, settings parsing, and task state transitions.
+Pure logic and service modules are tested in place with `#[cfg(test)]` modules, especially pane navigation, selection behavior, action handling, path handling, filesystem behavior, archive path safety, settings parsing, and task state transitions.
