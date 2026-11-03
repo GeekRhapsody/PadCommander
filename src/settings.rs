@@ -1,6 +1,7 @@
+use crate::ftp::FtpServer;
 use serde::{Deserialize, Serialize};
 use std::{
-    env, fs, io,
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -94,6 +95,8 @@ pub struct Settings {
     pub last_right_pane_location: Option<String>,
     #[serde(default)]
     pub theme: Theme,
+    #[serde(default)]
+    pub ftp_servers: Vec<FtpServer>,
 }
 
 impl Default for Settings {
@@ -107,6 +110,7 @@ impl Default for Settings {
             last_left_pane_location: None,
             last_right_pane_location: None,
             theme: Theme::Dark,
+            ftp_servers: Vec::new(),
         }
     }
 }
@@ -133,7 +137,7 @@ pub fn clamp_ui_scale(ui_scale: f32) -> f32 {
 }
 
 pub fn config_file_path() -> PathBuf {
-    config_dir().join("settings.json")
+    crate::platform::config_dir().join("settings.json")
 }
 
 pub fn load() -> io::Result<Settings> {
@@ -160,13 +164,6 @@ pub fn save_to_path(settings: &Settings, path: &Path) -> io::Result<()> {
     fs::write(path, contents)
 }
 
-fn config_dir() -> PathBuf {
-    env::var_os("APPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(env::temp_dir)
-        .join("PadCommander")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,6 +179,14 @@ mod tests {
             last_left_pane_location: Some("C:\\Users".to_owned()),
             last_right_pane_location: Some("D:\\".to_owned()),
             theme: Theme::Light,
+            ftp_servers: vec![FtpServer {
+                host: "nas.local".to_owned(),
+                port: 21,
+                username: "deck".to_owned(),
+                path: "/games".to_owned(),
+                secure: true,
+                saved_password: Some("sealed".to_owned()),
+            }],
         };
 
         let json = serde_json::to_string(&settings).expect("serialize settings");
@@ -201,6 +206,7 @@ mod tests {
         assert!(settings.favourites.is_empty());
         assert_eq!(settings.last_left_pane_location, None);
         assert_eq!(settings.last_right_pane_location, None);
+        assert!(settings.ftp_servers.is_empty());
     }
 
     #[test]
@@ -214,6 +220,7 @@ mod tests {
             last_left_pane_location: None,
             last_right_pane_location: None,
             theme: Theme::Dark,
+            ftp_servers: Vec::new(),
         }
         .sanitize();
 

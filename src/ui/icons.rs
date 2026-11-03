@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::state::{FileEntry, FileEntryKind};
 
-pub const ICON_SIZE: f32 = 16.0;
+pub const ICON_SIZE: f32 = 20.0;
 
 pub fn paint_entry_icon(painter: &Painter, rect: Rect, entry: &FileEntry) {
     match entry.kind {

@@ -4,8 +4,10 @@ mod action;
 mod app;
 mod archive;
 mod fs;
+mod ftp;
 mod input;
 mod platform;
+mod secrets;
 mod settings;
 mod state;
 mod tasks;
@@ -15,7 +17,7 @@ mod ui;
 use app::{APP_TITLE, PadCommanderApp};
 
 fn main() -> eframe::Result {
-    let native_options = platform::windows::native_options(APP_TITLE);
+    let native_options = platform::native_options(APP_TITLE);
 
     eframe::run_native(
         APP_TITLE,

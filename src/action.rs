@@ -28,8 +28,10 @@ pub enum CommanderAction {
     CompressToOtherPane,
     DecompressToOtherPane,
     ConnectFtp,
-    UploadToOtherPane,
-    DownloadToOtherPane,
+    AddFtpServer,
+    RemoveFtpServer,
+    FocusFtpServer(usize),
+    DisconnectFtp,
     CreateShortcutInOtherPane,
     StartDemoTask,
     StartFailingDemoTask,
@@ -89,7 +91,7 @@ pub enum TextInputPurpose {
     ArchiveDestination,
     ArchivePassword,
     ShortcutName,
-    FtpProfileField,
+    FtpPassword,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

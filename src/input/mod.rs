@@ -12,6 +12,17 @@ pub const GAMEPAD_POLL_INTERVAL: Duration = Duration::from_millis(16);
 const INITIAL_REPEAT_DELAY: Duration = Duration::from_millis(325);
 const REPEAT_INTERVAL: Duration = Duration::from_millis(70);
 
+/// Which screen or dialog has input focus; decides what each key and button means.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct InputContext {
+    pub text_input: bool,
+    pub settings: bool,
+    pub favourites: bool,
+    pub servers: bool,
+    pub modal: bool,
+    pub input_help: bool,
+}
+
 pub struct InputManager {
     keyboard: KeyboardInputManager,
     gamepad: GamepadInputManager,
@@ -32,28 +43,11 @@ impl InputManager {
     pub fn collect_actions(
         &mut self,
         ctx: &egui::Context,
-        text_input_active: bool,
-        settings_active: bool,
-        favourites_active: bool,
-        modal_active: bool,
-        input_help_active: bool,
+        context: InputContext,
     ) -> Vec<CommanderAction> {
         let now = Instant::now();
-        let mut actions = self.keyboard.collect_actions(
-            ctx,
-            now,
-            text_input_active,
-            settings_active,
-            input_help_active,
-        );
-        actions.extend(self.gamepad.poll_actions(
-            now,
-            text_input_active,
-            settings_active,
-            favourites_active,
-            modal_active,
-            input_help_active,
-        ));
+        let mut actions = self.keyboard.collect_actions(ctx, now, context);
+        actions.extend(self.gamepad.poll_actions(now, context));
         actions
     }
 }
@@ -69,14 +63,12 @@ impl KeyboardInputManager {
         &mut self,
         ctx: &egui::Context,
         now: Instant,
-        text_input_active: bool,
-        settings_active: bool,
-        input_help_active: bool,
+        context: InputContext,
     ) -> Vec<CommanderAction> {
         ctx.input(|input| {
             let mut actions = Vec::new();
 
-            if text_input_active {
+            if context.text_input {
                 for event in &input.events {
                     if let egui::Event::Text(text) = event
                         && !text.is_empty()
@@ -125,7 +117,7 @@ impl KeyboardInputManager {
                 return actions;
             }
 
-            if input_help_active {
+            if context.input_help {
                 if input.key_pressed(egui::Key::Escape) {
                     actions.push(CommanderAction::Cancel);
                 }
@@ -173,11 +165,11 @@ impl KeyboardInputManager {
                 actions.push(CommanderAction::OpenSelected);
             }
 
-            if settings_active && input.key_pressed(egui::Key::ArrowLeft) {
+            if context.settings && input.key_pressed(egui::Key::ArrowLeft) {
                 actions.push(CommanderAction::AdjustFocusedSettingLeft);
             }
 
-            if settings_active && input.key_pressed(egui::Key::ArrowRight) {
+            if context.settings && input.key_pressed(egui::Key::ArrowRight) {
                 actions.push(CommanderAction::AdjustFocusedSettingRight);
             }
 
@@ -198,9 +190,30 @@ impl KeyboardInputManager {
             }
 
             if input.key_pressed(egui::Key::F3)
-                || (input.modifiers.ctrl && input.key_pressed(egui::Key::F))
+                || (input.modifiers.ctrl && input.key_pressed(egui::Key::D))
             {
                 actions.push(CommanderAction::OpenFavourites);
+            }
+
+            // Ctrl+F is Total Commander's FTP connect shortcut.
+            if input.modifiers.ctrl && input.key_pressed(egui::Key::F) {
+                actions.push(CommanderAction::ConnectFtp);
+            }
+
+            if input.key_pressed(egui::Key::F9) {
+                actions.push(CommanderAction::OpenCommandPalette);
+            }
+
+            if input.key_pressed(egui::Key::F10) {
+                actions.push(CommanderAction::OpenSettings);
+            }
+
+            if input.key_pressed(egui::Key::Insert) {
+                if context.favourites {
+                    actions.push(CommanderAction::AddFavourite);
+                } else if context.servers {
+                    actions.push(CommanderAction::AddFtpServer);
+                }
             }
 
             if input.key_pressed(egui::Key::F2) {
@@ -220,7 +233,13 @@ impl KeyboardInputManager {
             }
 
             if input.key_pressed(egui::Key::F8) || input.key_pressed(egui::Key::Delete) {
-                actions.push(CommanderAction::Delete);
+                actions.push(if context.favourites {
+                    CommanderAction::RemoveFavourite
+                } else if context.servers {
+                    CommanderAction::RemoveFtpServer
+                } else {
+                    CommanderAction::Delete
+                });
             }
 
             if input.modifiers.ctrl && input.key_pressed(egui::Key::R) {
@@ -279,15 +298,7 @@ impl GamepadInputManager {
         self.controller_type
     }
 
-    pub fn poll_actions(
-        &mut self,
-        now: Instant,
-        text_input_active: bool,
-        settings_active: bool,
-        favourites_active: bool,
-        modal_active: bool,
-        input_help_active: bool,
-    ) -> Vec<CommanderAction> {
+    pub fn poll_actions(&mut self, now: Instant, context: InputContext) -> Vec<CommanderAction> {
         let mut actions = Vec::new();
 
         let events = if let Some(gilrs) = &mut self.gilrs {
@@ -307,7 +318,7 @@ impl GamepadInputManager {
             match event.event {
                 EventType::ButtonPressed(button, _) => {
                     self.set_dpad_hold(button, true);
-                    let repeated_dpad = if text_input_active || settings_active {
+                    let repeated_dpad = if context.text_input || context.settings {
                         matches!(
                             button,
                             Button::DPadUp
@@ -320,14 +331,7 @@ impl GamepadInputManager {
                     };
 
                     if !repeated_dpad {
-                        actions.extend(action_for_button(
-                            button,
-                            text_input_active,
-                            settings_active,
-                            favourites_active,
-                            modal_active,
-                            input_help_active,
-                        ));
+                        actions.extend(action_for_button(button, context));
                     }
                 }
                 EventType::ButtonReleased(button, _) => {
@@ -353,7 +357,7 @@ impl GamepadInputManager {
             }
         }
 
-        if text_input_active {
+        if context.text_input {
             actions.extend(self.dpad_up.update(
                 self.dpad_up_held,
                 now,
@@ -374,7 +378,7 @@ impl GamepadInputManager {
                 now,
                 CommanderAction::TextInput(TextInputAction::MoveKeyFocus(FocusDirection::Right)),
             ));
-        } else if settings_active {
+        } else if context.settings {
             actions.extend(self.dpad_left.update(
                 self.dpad_left_held,
                 now,
@@ -395,7 +399,7 @@ impl GamepadInputManager {
                 now,
                 CommanderAction::MoveSelectionDown,
             ));
-        } else if !input_help_active {
+        } else if !context.input_help {
             actions.extend(self.dpad_up.update(
                 self.dpad_up_held,
                 now,
@@ -422,15 +426,8 @@ impl GamepadInputManager {
     }
 }
 
-fn action_for_button(
-    button: Button,
-    text_input_active: bool,
-    settings_active: bool,
-    favourites_active: bool,
-    modal_active: bool,
-    input_help_active: bool,
-) -> Option<CommanderAction> {
-    if text_input_active {
+fn action_for_button(button: Button, context: InputContext) -> Option<CommanderAction> {
+    if context.text_input {
         return match button {
             Button::South => Some(CommanderAction::TextInput(TextInputAction::PressFocusedKey)),
             Button::East => Some(CommanderAction::TextInput(TextInputAction::Cancel)),
@@ -443,7 +440,7 @@ fn action_for_button(
         };
     }
 
-    if input_help_active {
+    if context.input_help {
         return match button {
             Button::East => Some(CommanderAction::Cancel),
             Button::Select => Some(CommanderAction::ToggleInputHelp),
@@ -451,7 +448,7 @@ fn action_for_button(
         };
     }
 
-    if settings_active {
+    if context.settings {
         return match button {
             Button::DPadLeft => Some(CommanderAction::AdjustFocusedSettingLeft),
             Button::DPadRight => Some(CommanderAction::AdjustFocusedSettingRight),
@@ -461,7 +458,7 @@ fn action_for_button(
         };
     }
 
-    if favourites_active {
+    if context.favourites {
         return match button {
             Button::South => Some(CommanderAction::OpenFocusedFavourite),
             Button::East => Some(CommanderAction::Cancel),
@@ -471,7 +468,17 @@ fn action_for_button(
         };
     }
 
-    if modal_active {
+    if context.servers {
+        return match button {
+            Button::South => Some(CommanderAction::Confirm),
+            Button::East => Some(CommanderAction::Cancel),
+            Button::West => Some(CommanderAction::RemoveFtpServer),
+            Button::North => Some(CommanderAction::AddFtpServer),
+            _ => None,
+        };
+    }
+
+    if context.modal {
         return match button {
             Button::South => Some(CommanderAction::OpenSelected),
             Button::East => Some(CommanderAction::Cancel),
@@ -490,6 +497,7 @@ fn action_for_button(
         Button::Start => Some(CommanderAction::OpenSettings),
         Button::Select => Some(CommanderAction::ToggleInputHelp),
         Button::LeftThumb => Some(CommanderAction::OpenFavourites),
+        Button::RightThumb => Some(CommanderAction::ConnectFtp),
         _ => None,
     }
 }
