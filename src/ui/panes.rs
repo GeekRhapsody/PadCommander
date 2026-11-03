@@ -67,9 +67,9 @@ fn pane(
     ui.allocate_rect(pane_rect, egui::Sense::hover());
 
     let (fill, stroke) = if is_active {
-        (tc.pane_active, egui::Stroke::new(2.5, tc.accent))
+        (tc.pane_active, egui::Stroke::new(2.5_f32, tc.accent))
     } else {
-        (tc.pane, egui::Stroke::new(1.0, tc.line))
+        (tc.pane, egui::Stroke::new(1.0_f32, tc.line))
     };
     let painter = ui.painter_at(pane_rect);
     painter.rect(
@@ -340,7 +340,7 @@ fn paint_column_header(
     painter.hline(
         (rect.left() + LIST_INSET)..=(rect.right() - LIST_INSET),
         rect.bottom(),
-        egui::Stroke::new(1.0, tc.line),
+        egui::Stroke::new(1.0_f32, tc.line),
     );
 }
 
@@ -521,14 +521,17 @@ fn paint_entry_row(
     tc: &ThemeColors,
 ) {
     let (fill, stroke) = if row.cursor && row.pane_active {
-        (tc.focused_fill, egui::Stroke::new(1.5, tc.focused_stroke))
+        (
+            tc.focused_fill,
+            egui::Stroke::new(1.5_f32, tc.focused_stroke),
+        )
     } else if row.cursor {
         let fill = if row.marked {
             tc.mark_fill
         } else {
             egui::Color32::TRANSPARENT
         };
-        (fill, egui::Stroke::new(1.5, tc.line))
+        (fill, egui::Stroke::new(1.5_f32, tc.line))
     } else if row.marked {
         (tc.mark_fill, egui::Stroke::NONE)
     } else {
@@ -622,7 +625,11 @@ impl RowColumns {
 }
 
 fn paint_footer(painter: &egui::Painter, rect: egui::Rect, pane: &PaneState, tc: &ThemeColors) {
-    painter.hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, tc.line));
+    painter.hline(
+        rect.x_range(),
+        rect.top(),
+        egui::Stroke::new(1.0_f32, tc.line),
+    );
     let center_y = rect.center().y;
     let left = rect.left() + PANE_PADDING;
     let right = rect.right() - PANE_PADDING;
@@ -743,7 +750,7 @@ fn paint_chevron(painter: &egui::Painter, center: egui::Pos2, color: egui::Color
             center + egui::vec2(2.5, 0.0),
             center + egui::vec2(-2.0, 4.5),
         ],
-        egui::Stroke::new(1.6, color),
+        egui::Stroke::new(1.6_f32, color),
     ));
 }
 
@@ -755,7 +762,7 @@ fn paint_sort_arrow(
 ) {
     // The arrowhead sits at -4 * dir, so ascending (dir = 1) points up.
     let dir = if ascending { 1.0 } else { -1.0 };
-    let stroke = egui::Stroke::new(1.6, color);
+    let stroke = egui::Stroke::new(1.6_f32, color);
     painter.line_segment(
         [
             center + egui::vec2(0.0, -4.0 * dir),

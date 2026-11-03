@@ -88,7 +88,7 @@ fn paint_logo(painter: &egui::Painter, rect: egui::Rect, tc: &ThemeColors) {
     painter.rect_stroke(
         left,
         3,
-        egui::Stroke::new(2.0, tc.accent),
+        egui::Stroke::new(2.0_f32, tc.accent),
         egui::StrokeKind::Inside,
     );
     painter.rect_filled(right, 4, tc.accent);
@@ -124,7 +124,7 @@ fn paint_spinner(ui: &egui::Ui, rect: egui::Rect, tc: &ThemeColors) {
     let center = rect.center();
     let radius = rect.width() / 2.0 - 1.5;
     ui.painter()
-        .circle_stroke(center, radius, egui::Stroke::new(2.5, tc.line));
+        .circle_stroke(center, radius, egui::Stroke::new(2.5_f32, tc.line));
     let start = ui.input(|i| i.time) as f32 * 5.0;
     let points = (0..=16)
         .map(|step| {
@@ -132,8 +132,10 @@ fn paint_spinner(ui: &egui::Ui, rect: egui::Rect, tc: &ThemeColors) {
             center + radius * egui::vec2(angle.cos(), angle.sin())
         })
         .collect();
-    ui.painter()
-        .add(egui::Shape::line(points, egui::Stroke::new(2.5, tc.accent)));
+    ui.painter().add(egui::Shape::line(
+        points,
+        egui::Stroke::new(2.5_f32, tc.accent),
+    ));
 }
 
 fn paint_progress_bar(painter: &egui::Painter, rect: egui::Rect, fraction: f32, tc: &ThemeColors) {
@@ -203,7 +205,7 @@ fn render_command_sheet(
         .show(ctx, |ui| {
             egui::Frame::new()
                 .fill(tc.pane_active)
-                .stroke(egui::Stroke::new(1.0, tc.line))
+                .stroke(egui::Stroke::new(1.0_f32, tc.line))
                 .inner_margin(egui::Margin {
                     left: 20,
                     right: 20,
@@ -314,7 +316,10 @@ fn command_row(
     );
     let destructive = entry.action == CommanderAction::Delete;
     let (fill, stroke) = if focused {
-        (tc.focused_fill, egui::Stroke::new(1.5, tc.focused_stroke))
+        (
+            tc.focused_fill,
+            egui::Stroke::new(1.5_f32, tc.focused_stroke),
+        )
     } else if destructive {
         (tc.danger_fill, egui::Stroke::NONE)
     } else if response.hovered() {
@@ -385,7 +390,7 @@ fn command_row(
         painter.rect_stroke(
             key_rect,
             5,
-            egui::Stroke::new(1.0, tc.line),
+            egui::Stroke::new(1.0_f32, tc.line),
             egui::StrokeKind::Inside,
         );
         painter.galley(key_rect.min + egui::vec2(6.0, 3.0), galley, tc.muted);
@@ -457,7 +462,7 @@ fn paint_command_icon(
     action: &CommanderAction,
     color: egui::Color32,
 ) {
-    let stroke = egui::Stroke::new(1.6, color);
+    let stroke = egui::Stroke::new(1.6_f32, color);
     let p = |x: f32, y: f32| rect.min + egui::vec2(x, y) * (rect.width() / 18.0);
     let line = |points: Vec<egui::Pos2>| {
         painter.add(egui::Shape::line(points, stroke));
@@ -555,7 +560,7 @@ fn paint_command_icon(
 }
 
 fn paint_arrow_right(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
-    let stroke = egui::Stroke::new(1.6, color);
+    let stroke = egui::Stroke::new(1.6_f32, color);
     let y = rect.center().y;
     painter.line_segment(
         [
@@ -595,7 +600,7 @@ fn paint_scrim(ctx: &egui::Context, id: &str, tc: &ThemeColors) {
 fn modal_frame(tc: &ThemeColors) -> egui::Frame {
     egui::Frame::new()
         .fill(tc.pane_active)
-        .stroke(egui::Stroke::new(1.0, tc.line))
+        .stroke(egui::Stroke::new(1.0_f32, tc.line))
         .corner_radius(16)
         .inner_margin(egui::Margin::same(24))
 }
@@ -672,7 +677,7 @@ fn modal_overlay(
                             if focused {
                                 button = button
                                     .fill(tc.focused_fill)
-                                    .stroke(egui::Stroke::new(1.5, tc.focused_stroke));
+                                    .stroke(egui::Stroke::new(1.5_f32, tc.focused_stroke));
                             }
                             if ui.add_sized([ui.available_width(), 34.0], button).clicked() {
                                 if index == 0 {
@@ -699,7 +704,7 @@ fn modal_overlay(
                             if focused {
                                 button = button
                                     .fill(tc.focused_fill)
-                                    .stroke(egui::Stroke::new(1.5, tc.focused_stroke));
+                                    .stroke(egui::Stroke::new(1.5_f32, tc.focused_stroke));
                             }
                             if ui.add_sized([ui.available_width(), 34.0], button).clicked() {
                                 if index == 0 {
@@ -822,11 +827,11 @@ fn modal_overlay(
                             let focused =
                                 settings_modal.focused_setting() == SettingsModalFocus::Quit;
                             let mut button = egui::Button::new("Quit App")
-                                .stroke(egui::Stroke::new(2.0, egui::Color32::TRANSPARENT));
+                                .stroke(egui::Stroke::new(2.0_f32, egui::Color32::TRANSPARENT));
                             if focused {
                                 button = button
                                     .fill(tc.focused_fill)
-                                    .stroke(egui::Stroke::new(1.5, tc.focused_stroke));
+                                    .stroke(egui::Stroke::new(1.5_f32, tc.focused_stroke));
                             }
                             if ui.add_sized([260.0, 34.0], button).clicked() {
                                 actions.push(CommanderAction::QuitDevelopment);
@@ -862,7 +867,7 @@ fn modal_overlay(
                                 if focused {
                                     button = button
                                         .fill(tc.focused_fill)
-                                        .stroke(egui::Stroke::new(1.5, tc.focused_stroke));
+                                        .stroke(egui::Stroke::new(1.5_f32, tc.focused_stroke));
                                 }
                                 if ui.add_sized([ui.available_width(), 34.0], button).clicked() {
                                     actions.push(CommanderAction::FocusFavourite(index));
@@ -976,7 +981,7 @@ fn modal_overlay(
                             if focused {
                                 button = button
                                     .fill(tc.focused_fill)
-                                    .stroke(egui::Stroke::new(1.5, tc.focused_stroke));
+                                    .stroke(egui::Stroke::new(1.5_f32, tc.focused_stroke));
                             }
                             if ui.add_sized([360.0, 34.0], button).clicked() {
                                 actions.push(CommanderAction::FocusDecompressOption(index));
@@ -1004,7 +1009,7 @@ fn modal_overlay(
                             if focused {
                                 button = button
                                     .fill(tc.focused_fill)
-                                    .stroke(egui::Stroke::new(1.5, tc.focused_stroke));
+                                    .stroke(egui::Stroke::new(1.5_f32, tc.focused_stroke));
                             }
                             if ui.add_sized([320.0, 34.0], button).clicked() {
                                 actions.push(CommanderAction::SelectSortOrder(*sort_order));
@@ -1240,12 +1245,12 @@ fn settings_row(
     let frame = if focused {
         egui::Frame::new()
             .fill(tc.focused_fill)
-            .stroke(egui::Stroke::new(1.5, tc.focused_stroke))
+            .stroke(egui::Stroke::new(1.5_f32, tc.focused_stroke))
             .corner_radius(8)
             .inner_margin(egui::Margin::same(8))
     } else {
         egui::Frame::new()
-            .stroke(egui::Stroke::new(1.5, egui::Color32::TRANSPARENT))
+            .stroke(egui::Stroke::new(1.5_f32, egui::Color32::TRANSPARENT))
             .corner_radius(8)
             .inner_margin(egui::Margin::same(8))
     };
@@ -1320,7 +1325,7 @@ fn render_transfer_conflict(
         if focused {
             button = button
                 .fill(tc.focused_fill)
-                .stroke(egui::Stroke::new(1.5, tc.focused_stroke));
+                .stroke(egui::Stroke::new(1.5_f32, tc.focused_stroke));
         }
         if ui.add_sized([ui.available_width(), 34.0], button).clicked() {
             if index == 0 {

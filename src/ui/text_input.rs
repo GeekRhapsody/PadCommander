@@ -35,7 +35,7 @@ pub fn show(
         .show(ctx, |ui| {
             egui::Frame::new()
                 .fill(tc.pane_active)
-                .stroke(egui::Stroke::new(1.0, tc.line))
+                .stroke(egui::Stroke::new(1.0_f32, tc.line))
                 .corner_radius(egui::CornerRadius {
                     nw: 20,
                     ne: 20,
@@ -113,7 +113,7 @@ fn input_field(ui: &mut egui::Ui, dialog: &TextInputDialogState, tc: &ThemeColor
         rect,
         12,
         tc.field,
-        egui::Stroke::new(2.0, tc.accent),
+        egui::Stroke::new(2.0_f32, tc.accent),
         egui::StrokeKind::Inside,
     );
 
@@ -225,7 +225,7 @@ fn key_button(
         (false, false) => theme::regular(15.0),
     };
     let stroke = if focused {
-        egui::Stroke::new(2.5, tc.focused_stroke)
+        egui::Stroke::new(2.5_f32, tc.focused_stroke)
     } else {
         egui::Stroke::NONE
     };

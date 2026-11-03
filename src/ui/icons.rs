@@ -88,7 +88,7 @@ fn paint_folder(painter: &Painter, rect: Rect, color: Color32) {
 
 fn paint_file(painter: &Painter, rect: Rect, color: Color32) {
     let w = rect.width();
-    let fold = (w * 0.28).max(3.0).min(5.0);
+    let fold = (w * 0.28).clamp(3.0, 5.0);
     let min = rect.min;
 
     painter.rect_filled(rect, CornerRadius::ZERO, color);
@@ -108,7 +108,7 @@ fn paint_file(painter: &Painter, rect: Rect, color: Color32) {
 
     painter.line_segment(
         [Pos2::new(tr.x - fold, tr.y), Pos2::new(min.x, tr.y)],
-        Stroke::new(0.5, Color32::from_white_alpha(40)),
+        Stroke::new(0.5_f32, Color32::from_white_alpha(40)),
     );
 }
 
@@ -129,7 +129,7 @@ fn paint_archive(painter: &Painter, rect: Rect) {
     let spine_top = top + 1.5;
     painter.line_segment(
         [Pos2::new(cx, spine_top), Pos2::new(cx, bot)],
-        Stroke::new(0.75, zip_color),
+        Stroke::new(0.75_f32, zip_color),
     );
 
     // Teeth: alternating left/right horizontal ticks
@@ -144,7 +144,7 @@ fn paint_archive(painter: &Painter, rect: Rect) {
         };
         painter.line_segment(
             [Pos2::new(x0, y), Pos2::new(x1, y)],
-            Stroke::new(1.0, zip_color),
+            Stroke::new(1.0_f32, zip_color),
         );
         y += 2.2;
         go_left = !go_left;
@@ -232,7 +232,7 @@ fn paint_comic(painter: &Painter, rect: Rect) {
 
     let w = rect.width();
     let h = rect.height();
-    let fold = (w * 0.28).max(3.0).min(5.0);
+    let fold = (w * 0.28).clamp(3.0, 5.0);
 
     // Bubble body: white rounded rect, inset from edges, clear of fold
     let bx1 = rect.min.x + 1.5;
@@ -302,11 +302,11 @@ fn paint_document(painter: &Painter, rect: Rect) {
     let bg = Color32::from_rgb(245, 245, 248);
     paint_file(painter, rect, bg);
 
-    let fold = (rect.width() * 0.28).max(3.0).min(5.0);
+    let fold = (rect.width() * 0.28).clamp(3.0, 5.0);
     let lx1 = rect.min.x + 2.0;
     let lx2_full = rect.max.x - fold - 1.5;
     let line_color = Color32::from_rgb(50, 50, 55);
-    let stroke = Stroke::new(0.8, line_color);
+    let stroke = Stroke::new(0.8_f32, line_color);
 
     // 4 text lines; the last one is shorter to mimic a real paragraph
     let top = rect.min.y + 3.5;
@@ -325,7 +325,7 @@ fn paint_document(painter: &Painter, rect: Rect) {
 // Draws a 6-tooth gear centered in the usable area of a file icon.
 // `bg` is used for the central hole so it blends into the file background.
 fn paint_gear(painter: &Painter, rect: Rect, color: Color32, bg: Color32) {
-    let fold = (rect.width() * 0.28).max(3.0).min(5.0);
+    let fold = (rect.width() * 0.28).clamp(3.0, 5.0);
     let cx = rect.min.x + (rect.width() - fold) * 0.5;
     let cy = rect.center().y + 1.0;
 

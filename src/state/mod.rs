@@ -253,7 +253,7 @@ impl AppState {
                     let done = self
                         .task_manager
                         .task_by_id(task_id)
-                        .map_or(true, |t| t.status.is_finished());
+                        .is_none_or(|t| t.status.is_finished());
                     if done {
                         self.dialog = DialogState::None;
                     } else {
@@ -804,7 +804,7 @@ impl AppState {
                 let done = self
                     .task_manager
                     .task_by_id(task_id)
-                    .map_or(true, |t| t.status.is_finished());
+                    .is_none_or(|t| t.status.is_finished());
                 if done {
                     self.dialog = DialogState::None;
                 }
@@ -1208,6 +1208,7 @@ impl AppState {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn execute_transfer_task(
         &mut self,
         kind: TaskKind,

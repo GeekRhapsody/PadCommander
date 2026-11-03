@@ -92,10 +92,10 @@ fn configure_visuals(ctx: &egui::Context, theme: Theme) {
     visuals.faint_bg_color = tc.chip;
     visuals.extreme_bg_color = tc.field;
     visuals.selection.bg_fill = tc.focused_fill;
-    visuals.selection.stroke = egui::Stroke::new(1.5, tc.focused_stroke);
+    visuals.selection.stroke = egui::Stroke::new(1.5_f32, tc.focused_stroke);
     visuals.hyperlink_color = tc.accent;
     visuals.override_text_color = Some(tc.text);
-    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, tc.line);
+    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0_f32, tc.line);
     for widget in [
         &mut visuals.widgets.inactive,
         &mut visuals.widgets.hovered,
