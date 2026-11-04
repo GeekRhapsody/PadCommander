@@ -3,6 +3,7 @@ use crate::{
     tasks::{ProgressSnapshot, TaskCompletionData, TaskOutcome, TaskReporter},
 };
 
+use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use std::{
     fs, io,
@@ -11,7 +12,7 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use suppaftp::{FtpError, RustlsConnector, RustlsFtpStream, list::File, rustls, types::FileType};
 
@@ -220,17 +221,17 @@ pub fn list(
     Ok(files
         .iter()
         .map(|file| FileEntry {
-            display_name: file.name().to_owned(),
-            virtual_path: child_location(location, file.name()),
-            kind: if file.is_directory() {
+            display_name: file.name.clone(),
+            virtual_path: child_location(location, &file.name),
+            kind: if file.is_directory {
                 FileEntryKind::Directory
             } else {
                 FileEntryKind::FtpItem
             },
-            size: (!file.is_directory()).then_some(file.size() as u64),
-            modified: Some(file.modified()),
+            size: (!file.is_directory).then_some(file.size),
+            modified: file.modified,
             flags: FileEntryFlags {
-                hidden: file.name().starts_with('.'),
+                hidden: file.name.starts_with('.'),
                 read_only: false,
             },
         })
@@ -238,23 +239,67 @@ pub fn list(
         .collect())
 }
 
-fn list_files(stream: &mut RustlsFtpStream, path: &str) -> Result<Vec<File>, FtpError> {
-    let files: Vec<File> = match stream.mlsd(Some(path)) {
+/// One entry of a remote folder listing.
+struct RemoteItem {
+    name: String,
+    is_directory: bool,
+    size: u64,
+    modified: Option<SystemTime>,
+}
+
+fn list_files(stream: &mut RustlsFtpStream, path: &str) -> Result<Vec<RemoteItem>, FtpError> {
+    let items: Vec<RemoteItem> = match stream.mlsd(Some(path)) {
         Ok(lines) => lines
             .iter()
-            .filter_map(|line| File::from_mlsx_line(line).ok())
+            .filter_map(|line| parse_mlsd_line(line))
             .collect(),
         // MLSD is optional (RFC 3659); fall back to the classic LIST format.
         Err(_) => stream
             .list(Some(path))?
             .iter()
             .filter_map(|line| File::from_str(line).ok())
+            .map(|file| RemoteItem {
+                name: file.name().to_owned(),
+                is_directory: file.is_directory(),
+                size: file.size() as u64,
+                modified: Some(file.modified()),
+            })
             .collect(),
     };
-    Ok(files
+    Ok(items
         .into_iter()
-        .filter(|file| file.name() != "." && file.name() != "..")
+        .filter(|item| item.name != "." && item.name != "..")
         .collect())
+}
+
+/// Parses an RFC 3659 `fact=value;fact=value; name` line. suppaftp's own parser rejects whole
+/// lines over facts real servers send (ProFTPD's `UNIX.mode=0644`, millisecond `modify`
+/// times), which left server panes empty, so unknown or odd facts are ignored here.
+fn parse_mlsd_line(line: &str) -> Option<RemoteItem> {
+    let (facts, name) = line.split_once(' ')?;
+    let mut item = RemoteItem {
+        name: name.to_owned(),
+        is_directory: false,
+        size: 0,
+        modified: None,
+    };
+    for (key, value) in facts.split(';').filter_map(|fact| fact.split_once('=')) {
+        match key.to_ascii_lowercase().as_str() {
+            "type" if value.eq_ignore_ascii_case("cdir") || value.eq_ignore_ascii_case("pdir") => {
+                return None;
+            }
+            "type" => item.is_directory = value.eq_ignore_ascii_case("dir"),
+            "size" => item.size = value.parse().unwrap_or(0),
+            "modify" => {
+                item.modified = value
+                    .get(..14)
+                    .and_then(|time| NaiveDateTime::parse_from_str(time, "%Y%m%d%H%M%S").ok())
+                    .map(|time| time.and_utc().into());
+            }
+            _ => {}
+        }
+    }
+    Some(item)
 }
 
 pub fn create_folder(stream: &mut RustlsFtpStream, location: &str) -> Result<(), FtpError> {
@@ -286,7 +331,7 @@ fn remove_tree(
     }
 
     for file in list_files(stream, path)? {
-        remove_tree(stream, &join_remote(path, file.name()), file.is_directory())?;
+        remove_tree(stream, &join_remote(path, &file.name), file.is_directory)?;
     }
     stream.rmdir(path)
 }
@@ -527,10 +572,10 @@ fn plan_download(
     for file in list_files(stream, &remote)? {
         plan_download(
             stream,
-            join_remote(&remote, file.name()),
-            local.join(file.name()),
-            file.is_directory(),
-            file.size() as u64,
+            join_remote(&remote, &file.name),
+            local.join(&file.name),
+            file.is_directory,
+            file.size,
             items,
         )?;
     }
@@ -613,6 +658,28 @@ mod tests {
         );
         assert!(is_ftp_location("ftps://host:990/"));
         assert!(!is_ftp_location(r"C:\ftp"));
+    }
+
+    #[test]
+    fn mlsd_lines_with_server_specific_facts_are_kept() {
+        let proftpd = "modify=20240105101500;perm=adfrw;size=6;type=file;unique=FD00U4;UNIX.group=1000;UNIX.mode=0644;UNIX.owner=1000; a b.txt";
+        let item = parse_mlsd_line(proftpd).expect("ProFTPD file line");
+        assert_eq!(item.name, "a b.txt");
+        assert!(!item.is_directory);
+        assert_eq!(item.size, 6);
+        assert!(item.modified.is_some());
+
+        let iis = "Type=dir;Modify=20240105101500.123; games";
+        let item = parse_mlsd_line(iis).expect("IIS directory line");
+        assert_eq!(item.name, "games");
+        assert!(item.is_directory);
+        assert!(item.modified.is_some());
+    }
+
+    #[test]
+    fn mlsd_current_and_parent_entries_are_skipped() {
+        assert!(parse_mlsd_line("type=cdir;modify=20240105101500; .").is_none());
+        assert!(parse_mlsd_line("type=pdir;modify=20240105101500; ..").is_none());
     }
 
     #[test]
