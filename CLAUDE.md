@@ -30,7 +30,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 - [src/settings.rs](src/settings.rs): JSON settings at `%APPDATA%\PadCommander\settings.json` (Windows) or `~/.config/PadCommander/settings.json` (Linux) (UI scale, theme, controller override, recycle bin, hidden files).
 - [src/theme.rs](src/theme.rs): colors and fonts for Dark/Light.
 
-FTP, upload and download actions exist in the enum but are stubs that set a status message.
+Copy/Move between a local pane and an FTP pane becomes an upload or download task; FTP to FTP is not supported. FTP listings use MLSD, read by our own tolerant `parse_mlsd_line` (suppaftp's parser rejects whole lines over facts like `UNIX.mode=0644`), and fall back to `LIST` parsed by `suppaftp::list::File`.
 
 ## Code-writing rules
 
