@@ -102,6 +102,11 @@ jobs:
           path: dist
           merge-multiple: true
 
+      # The in-app updater refuses a download whose hash is not listed here.
+      - name: Write checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:

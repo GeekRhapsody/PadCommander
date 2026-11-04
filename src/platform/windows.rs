@@ -1,5 +1,6 @@
 use std::env;
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 use windows_sys::Win32::Storage::FileSystem::{GetLogicalDrives, GetVolumeInformationW};
 use windows_sys::Win32::UI::Shell::{
     FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, SHFILEOPSTRUCTW, SHFileOperationW,
@@ -23,6 +24,15 @@ pub fn config_dir() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(env::temp_dir)
         .join("PadCommander")
+}
+
+/// The file a self-update replaces, and the ending of the release asset that replaces it.
+pub fn update_target() -> io::Result<(PathBuf, &'static str)> {
+    Ok((env::current_exe()?, "-windows-x86_64.zip"))
+}
+
+pub fn make_executable(_path: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 pub fn logical_drive_roots() -> Vec<PathBuf> {

@@ -1,9 +1,9 @@
 use std::{
     env,
     ffi::CString,
-    fs,
+    fs, io,
     mem::MaybeUninit,
-    os::unix::ffi::OsStrExt,
+    os::unix::{ffi::OsStrExt, fs::PermissionsExt},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -21,6 +21,19 @@ pub fn config_dir() -> PathBuf {
         .or_else(|| home_dir().map(|home| home.join(".config")))
         .unwrap_or_else(env::temp_dir)
         .join("PadCommander")
+}
+
+/// The file a self-update replaces, and the ending of the release asset that replaces it.
+pub fn update_target() -> io::Result<(PathBuf, &'static str)> {
+    // Inside an AppImage, current_exe is the binary in the read-only mount; the file to swap is the AppImage itself.
+    if let Some(appimage) = env::var_os("APPIMAGE") {
+        return Ok((PathBuf::from(appimage), "-linux-x86_64.AppImage"));
+    }
+    Ok((env::current_exe()?, "-linux-x86_64.tar.gz"))
+}
+
+pub fn make_executable(path: &Path) -> io::Result<()> {
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755))
 }
 
 pub fn logical_drive_roots() -> Vec<PathBuf> {

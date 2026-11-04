@@ -5,6 +5,7 @@ use crate::{
     platform, secrets,
     settings::{self, Settings, UI_SCALE_STEP},
     tasks::{DeleteMode, TaskId, TaskKind, TaskManager, TaskOutcome, TaskStatus},
+    update::{self, Update},
 };
 
 use std::{
@@ -90,6 +91,8 @@ pub struct AppState {
     ftp_sessions: BTreeMap<PaneSide, FtpSession>,
     ftp_events_tx: mpsc::Sender<FtpEvent>,
     ftp_events_rx: mpsc::Receiver<FtpEvent>,
+    update_check: Option<mpsc::Receiver<Result<Option<Update>, String>>>,
+    update_task: Option<(TaskId, Update)>,
 }
 
 /// A pane connected to an FTP server. Dropped as soon as the pane shows a local location.
@@ -157,6 +160,8 @@ impl AppState {
             ftp_sessions: BTreeMap::new(),
             ftp_events_tx,
             ftp_events_rx,
+            update_check: None,
+            update_task: None,
         };
 
         state.refresh_pane(PaneSide::Left);
@@ -272,6 +277,18 @@ impl AppState {
             CommanderAction::OpenSettings => {
                 self.dialog = DialogState::Settings(SettingsModalState::default());
                 self.status = "Settings opened.".to_owned();
+            }
+            CommanderAction::CheckForUpdates => {
+                let (sender, receiver) = mpsc::channel();
+                thread::spawn(move || {
+                    let _ = sender.send(update::check_latest());
+                });
+                self.update_check = Some(receiver);
+                self.dialog = DialogState::Message {
+                    title: "Check for Updates".to_owned(),
+                    message: "Looking for a newer version...".to_owned(),
+                };
+                self.status = "Checking for updates...".to_owned();
             }
             CommanderAction::CreateFolder => {
                 self.begin_text_input(TextInputPurpose::CreateFolder, String::new())
@@ -446,9 +463,53 @@ impl AppState {
             }
         }
 
+        if let Some(receiver) = &self.update_check
+            && let Ok(result) = receiver.try_recv()
+        {
+            self.update_check = None;
+            self.dialog = match result {
+                Ok(Some(update)) => DialogState::UpdateAvailable(UpdatePromptState {
+                    update,
+                    focused_index: 0,
+                }),
+                Ok(None) => DialogState::Message {
+                    title: "Up to Date".to_owned(),
+                    message: format!(
+                        "PadCommander {} is the latest version.",
+                        update::CURRENT_VERSION
+                    ),
+                },
+                Err(error) => DialogState::Message {
+                    title: "Update Check Failed".to_owned(),
+                    message: error,
+                },
+            };
+            self.status = "Update check finished.".to_owned();
+        }
+
         for completion in self.task_manager.poll_completed() {
             let modal_is_showing =
                 matches!(self.dialog, DialogState::OperationProgress(id) if id == completion.id);
+
+            if let Some((_, update)) = self
+                .update_task
+                .take_if(|(id, _)| *id == completion.id)
+                .filter(|_| completion.status == TaskStatus::Succeeded)
+            {
+                // Leave any other dialog the user opened during the download alone.
+                if modal_is_showing || self.dialog == DialogState::None {
+                    self.dialog = DialogState::UpdateInstalled(UpdatePromptState {
+                        update,
+                        focused_index: 0,
+                    });
+                } else {
+                    self.status = format!(
+                        "Version {} installed. Restart PadCommander to use it.",
+                        update.version
+                    );
+                }
+                continue;
+            }
 
             if let Some(context) = self.delete_tasks.remove(&completion.id) {
                 self.refresh_pane(context.pane);
@@ -794,6 +855,39 @@ impl AppState {
             }
             DialogState::SortBy(sort_by) => {
                 self.apply_active_pane_sort(sort_by.selected_sort_order());
+            }
+            DialogState::UpdateAvailable(prompt) => {
+                if prompt.focused_index == 1 {
+                    self.dialog = DialogState::None;
+                    return DispatchResult::default();
+                }
+                let update = prompt.update.clone();
+                let task_update = update.clone();
+                let task_id = self.task_manager.spawn_threaded(
+                    TaskKind::Download,
+                    format!("Updating to version {}", update.version),
+                    true,
+                    move |reporter| update::install(reporter, task_update),
+                );
+                self.update_task = Some((task_id, update));
+                self.dialog = DialogState::OperationProgress(task_id);
+            }
+            DialogState::UpdateInstalled(prompt) => {
+                let target = prompt.update.target.clone();
+                let restart_now = prompt.focused_index == 0;
+                self.dialog = DialogState::None;
+                if !restart_now {
+                    self.status =
+                        "The update takes effect the next time PadCommander starts.".to_owned();
+                    return DispatchResult::default();
+                }
+                if let Err(error) = update::restart(&target) {
+                    self.status = format!("Could not restart: {error}");
+                    return DispatchResult::default();
+                }
+                return DispatchResult {
+                    quit_requested: true,
+                };
             }
             DialogState::Message { .. } => {
                 self.dialog = DialogState::None;
@@ -1666,6 +1760,10 @@ impl AppState {
                 conflict.move_focus(movement);
                 true
             }
+            DialogState::UpdateAvailable(prompt) | DialogState::UpdateInstalled(prompt) => {
+                prompt.move_focus(movement);
+                true
+            }
             DialogState::None
             | DialogState::Message { .. }
             | DialogState::TextInput(_)
@@ -1698,6 +1796,9 @@ impl AppState {
                     self.cycle_controller_override(delta > 0.0)
                 }
                 SettingsModalFocus::Theme => self.cycle_theme(delta > 0.0),
+                SettingsModalFocus::CheckForUpdates => {
+                    self.status = "Press A / Enter to check for updates.".to_owned();
+                }
                 SettingsModalFocus::Quit => {
                     self.status = "Press A / Enter to quit.".to_owned();
                 }
@@ -1718,6 +1819,9 @@ impl AppState {
             SettingsModalFocus::ShowHiddenFiles => self.toggle_show_hidden_files(),
             SettingsModalFocus::ControllerOverride => self.cycle_controller_override(true),
             SettingsModalFocus::Theme => self.cycle_theme(true),
+            SettingsModalFocus::CheckForUpdates => {
+                return self.dispatch_action(CommanderAction::CheckForUpdates);
+            }
             SettingsModalFocus::Quit => {
                 self.status = "Quit requested.".to_owned();
                 return DispatchResult {
@@ -2024,7 +2128,9 @@ impl AppState {
             | DialogState::SavePassword(_)
             | DialogState::Decompress(_)
             | DialogState::SortBy(_)
-            | DialogState::OperationProgress(_) => None,
+            | DialogState::OperationProgress(_)
+            | DialogState::UpdateAvailable(_)
+            | DialogState::UpdateInstalled(_) => None,
         }
     }
 }
@@ -2173,7 +2279,73 @@ mod tests {
             ftp_sessions: BTreeMap::new(),
             ftp_events_tx,
             ftp_events_rx,
+            update_check: None,
+            update_task: None,
         }
+    }
+
+    fn test_update() -> Update {
+        Update {
+            version: "99.0.0".to_owned(),
+            asset_name: "app.zip".to_owned(),
+            download_url: "https://example.test/app.zip".to_owned(),
+            checksums_url: "https://example.test/SHA256SUMS".to_owned(),
+            size: 1,
+            target: PathBuf::from("pad-commander"),
+        }
+    }
+
+    fn deliver_update_check(state: &mut AppState, result: Result<Option<Update>, String>) {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(result).unwrap();
+        state.update_check = Some(receiver);
+        state.poll_tasks();
+    }
+
+    #[test]
+    fn update_check_result_opens_matching_dialog() {
+        let mut state = test_state();
+
+        deliver_update_check(&mut state, Ok(Some(test_update())));
+        assert!(matches!(
+            &state.dialog,
+            DialogState::UpdateAvailable(prompt) if prompt.update.version == "99.0.0"
+        ));
+        assert!(state.update_check.is_none());
+
+        deliver_update_check(&mut state, Ok(None));
+        assert!(
+            matches!(&state.dialog, DialogState::Message { title, .. } if title == "Up to Date")
+        );
+
+        deliver_update_check(&mut state, Err("offline".to_owned()));
+        assert!(matches!(
+            &state.dialog,
+            DialogState::Message { message, .. } if message == "offline"
+        ));
+    }
+
+    #[test]
+    fn declining_update_prompts_closes_them_without_quitting() {
+        let mut state = test_state();
+        for dialog in [
+            DialogState::UpdateAvailable(UpdatePromptState {
+                update: test_update(),
+                focused_index: 0,
+            }),
+            DialogState::UpdateInstalled(UpdatePromptState {
+                update: test_update(),
+                focused_index: 0,
+            }),
+        ] {
+            state.dialog = dialog;
+            state.dispatch_action(CommanderAction::MoveSelectionDown);
+            let result = state.dispatch_action(CommanderAction::Confirm);
+
+            assert_eq!(state.dialog, DialogState::None);
+            assert!(!result.quit_requested);
+        }
+        assert!(state.update_task.is_none());
     }
 
     #[test]
@@ -2354,6 +2526,11 @@ mod tests {
         for _ in 0..5 {
             state.dispatch_action(CommanderAction::MoveSelectionDown);
         }
+        assert_eq!(
+            state.focused_setting(),
+            Some(SettingsModalFocus::CheckForUpdates)
+        );
+        state.dispatch_action(CommanderAction::MoveSelectionDown);
         let result = state.dispatch_action(CommanderAction::Confirm);
 
         assert!(result.quit_requested);

@@ -52,6 +52,7 @@ pub enum CommanderAction {
     ToggleShowHiddenFiles,
     OpenCommandPalette,
     OpenSettings,
+    CheckForUpdates,
     ToggleInputHelp,
     Confirm,
     Cancel,

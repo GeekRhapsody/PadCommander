@@ -22,6 +22,10 @@ suppaftp = { version = "6.3.0", features = ["rustls"] }
 chacha20poly1305 = "0.11.0"
 base64 = "0.23.1"
 webpki-roots = "1.0.11"
+ureq = { version = "3.5.1", default-features = false, features = ["rustls"] }
+flate2 = "1.1.10"
+tar = "0.4.46"
+sha2 = "0.11"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61.3", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }

@@ -4,6 +4,7 @@ use super::{FileEntry, PaneSide, PaneSortOrder, SelectionMovement, TextInputDial
 use crate::{
     action::CommanderAction,
     tasks::{TaskId, TaskKind},
+    update::Update,
 };
 
 #[allow(dead_code)]
@@ -23,6 +24,24 @@ pub enum DialogState {
     Decompress(DecompressModalState),
     SortBy(SortByModalState),
     OperationProgress(TaskId),
+    UpdateAvailable(UpdatePromptState),
+    UpdateInstalled(UpdatePromptState),
+}
+
+/// Two-choice prompt shown before installing an update and again before restarting into it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpdatePromptState {
+    pub update: Update,
+    pub focused_index: usize,
+}
+
+impl UpdatePromptState {
+    pub fn move_focus(&mut self, movement: SelectionMovement) {
+        self.focused_index = match movement {
+            SelectionMovement::Up | SelectionMovement::PageUp | SelectionMovement::Home => 0,
+            SelectionMovement::Down | SelectionMovement::PageDown | SelectionMovement::End => 1,
+        };
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -32,7 +51,7 @@ pub struct SettingsModalState {
 
 impl SettingsModalState {
     pub fn move_focus(&mut self, movement: SelectionMovement) {
-        const LAST_INDEX: usize = 5;
+        const LAST_INDEX: usize = 6;
 
         self.focused_index = match movement {
             SelectionMovement::Up | SelectionMovement::PageUp => {
@@ -52,7 +71,8 @@ impl SettingsModalState {
             2 => SettingsModalFocus::ShowHiddenFiles,
             3 => SettingsModalFocus::ControllerOverride,
             4 => SettingsModalFocus::Theme,
-            5 => SettingsModalFocus::Quit,
+            5 => SettingsModalFocus::CheckForUpdates,
+            6 => SettingsModalFocus::Quit,
             _ => SettingsModalFocus::UiScale,
         }
     }
@@ -65,6 +85,7 @@ pub enum SettingsModalFocus {
     ShowHiddenFiles,
     ControllerOverride,
     Theme,
+    CheckForUpdates,
     Quit,
 }
 

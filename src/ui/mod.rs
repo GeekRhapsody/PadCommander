@@ -628,7 +628,9 @@ fn modal_overlay(
         | DialogState::SavePassword(_)
         | DialogState::Decompress(_)
         | DialogState::SortBy(_)
-        | DialogState::OperationProgress(_) => &state.dialog,
+        | DialogState::OperationProgress(_)
+        | DialogState::UpdateAvailable(_)
+        | DialogState::UpdateInstalled(_) => &state.dialog,
         DialogState::None | DialogState::TextInput(_) | DialogState::CommandMenu(_) => return,
     };
 
@@ -823,6 +825,24 @@ fn modal_overlay(
                             },
                         );
                         ui.add_space(8.0);
+                        {
+                            let focused = settings_modal.focused_setting()
+                                == SettingsModalFocus::CheckForUpdates;
+                            let mut button = egui::Button::new(format!(
+                                "Check for Updates (v{})",
+                                crate::update::CURRENT_VERSION
+                            ))
+                            .stroke(egui::Stroke::new(2.0_f32, egui::Color32::TRANSPARENT));
+                            if focused {
+                                button = button
+                                    .fill(tc.focused_fill)
+                                    .stroke(egui::Stroke::new(1.5_f32, tc.focused_stroke));
+                            }
+                            if ui.add_sized([260.0, 34.0], button).clicked() {
+                                actions.push(CommanderAction::CheckForUpdates);
+                            }
+                        }
+                        ui.add_space(4.0);
                         {
                             let focused =
                                 settings_modal.focused_setting() == SettingsModalFocus::Quit;
@@ -1029,6 +1049,42 @@ fn modal_overlay(
                     }
                     DialogState::OperationProgress(task_id) => {
                         render_operation_progress(ui, state, *task_id, images, tc);
+                    }
+                    DialogState::UpdateAvailable(prompt) | DialogState::UpdateInstalled(prompt) => {
+                        let installed = matches!(dialog, DialogState::UpdateInstalled(_));
+                        let version = &prompt.update.version;
+                        let choices = if installed {
+                            ui.heading("Update Installed");
+                            ui.label(format!(
+                                "Version {version} is installed. Restart PadCommander to use it."
+                            ));
+                            ["Restart Now", "Later"]
+                        } else {
+                            ui.heading("Update Available");
+                            ui.label(format!(
+                                "Version {version} is available. You have version {}.",
+                                crate::update::CURRENT_VERSION
+                            ));
+                            ["Update", "Not Now"]
+                        };
+                        ui.add_space(8.0);
+                        for (index, label) in choices.iter().enumerate() {
+                            let mut button = egui::Button::new(*label);
+                            if index == prompt.focused_index {
+                                button = button
+                                    .fill(tc.focused_fill)
+                                    .stroke(egui::Stroke::new(1.5_f32, tc.focused_stroke));
+                            }
+                            if ui.add_sized([ui.available_width(), 34.0], button).clicked() {
+                                actions.push(if index == 0 {
+                                    CommanderAction::Confirm
+                                } else {
+                                    CommanderAction::Cancel
+                                });
+                            }
+                        }
+                        ui.add_space(8.0);
+                        gamepad_hint_move_select_cancel(ui, images);
                     }
                     DialogState::None | DialogState::TextInput(_) | DialogState::CommandMenu(_) => {
                     }

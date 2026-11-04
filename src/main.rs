@@ -13,10 +13,12 @@ mod state;
 mod tasks;
 mod theme;
 mod ui;
+mod update;
 
 use app::{APP_TITLE, PadCommanderApp};
 
 fn main() -> eframe::Result {
+    update::remove_leftover();
     let native_options = platform::native_options(APP_TITLE);
 
     eframe::run_native(
