@@ -1,6 +1,6 @@
 [package]
 name = "pad-commander"
-version = "2.0.0"
+version = "2.0.1"
 edition = "2024"
 rust-version = "1.85"
 description = "Gamepad-first two-pane graphical file manager for Windows and Linux."
